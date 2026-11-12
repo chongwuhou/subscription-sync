@@ -156,6 +156,16 @@ test("merges published nodes from multiple sources for one aggregate candidate",
   assert.match(candidate.output, /backup\.example\.com/);
 });
 
+test("places custom aggregate nodes at the selected edge", async () => {
+  const sourceNodes = (await buildCandidate(sampleClash)).nodes;
+  const customNodes = decodeSubscription("vless://11111111-1111-1111-1111-111111111111@custom.example.com:443?security=tls#Custom");
+  const top = await buildAggregateCandidate([sourceNodes], { customNodes, customNodePosition: "top" });
+  const tail = await buildAggregateCandidate([sourceNodes], { customNodes, customNodePosition: "tail" });
+  assert.equal(top.nodes[0].name, "Custom");
+  assert.equal(top.nodes[0].server, "custom.example.com");
+  assert.equal(tail.nodes.at(-1).name, "Custom");
+});
+
 test("unchanged content is not republished", async () => {
   const candidate = await buildCandidate(sampleClash, { hashFn: hashByContent });
   const previous = { contentHash: candidate.contentHash, output: candidate.output };

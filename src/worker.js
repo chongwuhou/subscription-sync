@@ -7,6 +7,7 @@ import {
   stateKey,
   validateSubscriptionProfiles
 } from "./config.js";
+import { decodeSubscription } from "./codec.js";
 import { detectTarget, renderSubscription, supportedTargets } from "./formats.js";
 import { normalizeClashConfig } from "./clash.js";
 
@@ -91,7 +92,9 @@ const ADMIN_HTML = `<!doctype html>
         "proxy-groups": [{ name: "PROXY", type: "select", proxies: ["DIRECT", "{{NODES}}"] }],
         "rule-providers": {},
         rules: ["MATCH,PROXY"]
-      }
+      },
+      aggregateCustomNodes: [],
+      aggregateCustomNodePosition: "tail"
     };
     const status = document.getElementById("status");
     const aggregateRoot = document.getElementById("aggregate");
@@ -133,6 +136,22 @@ const ADMIN_HTML = `<!doctype html>
       wrapper.appendChild(document.createTextNode(label));
       parent.appendChild(wrapper);
       return input;
+    }
+    function addSelect(parent, key, label, value, options) {
+      const wrapper = document.createElement("label");
+      wrapper.textContent = label;
+      const select = document.createElement("select");
+      select.dataset.field = key;
+      options.forEach((option) => {
+        const item = document.createElement("option");
+        item.value = option.value;
+        item.textContent = option.label;
+        item.selected = option.value === value;
+        select.appendChild(item);
+      });
+      wrapper.appendChild(select);
+      parent.appendChild(wrapper);
+      return select;
     }
     function publicLinkFor(token) {
       return token ? location.origin + "/sub/" + encodeURIComponent(token) : "";
@@ -269,6 +288,22 @@ const ADMIN_HTML = `<!doctype html>
       note.className = "muted";
       note.textContent = "汇总地址会合并所有源头订阅的已发布有效节点；某个源头失效时保留它上一次的有效版本。修改 /sub/ 后面的路径后点击保存即可。";
       card.appendChild(note);
+      addField(
+        card,
+        "aggregateCustomNodes",
+        "汇总自定义节点（每行一个完整节点链接）",
+        (state.aggregateCustomNodes || []).join("\\n"),
+        "textarea",
+        "例如：vless://...#备用节点"
+      );
+      addSelect(card, "aggregateCustomNodePosition", "自定义节点位置", state.aggregateCustomNodePosition || "tail", [
+        { value: "top", label: "顶部" },
+        { value: "tail", label: "尾部" }
+      ]);
+      const customNote = document.createElement("p");
+      customNote.className = "muted";
+      customNote.textContent = "支持常见 vmess、vless、trojan、ss、ssr、hysteria2、tuic、anytls、socks5、http 节点链接；每行一个。只加入汇总订阅，不会加入单独订阅。";
+      card.appendChild(customNote);
       aggregateRoot.appendChild(card);
 
       const expiredCard = document.createElement("fieldset");
@@ -550,6 +585,8 @@ const ADMIN_HTML = `<!doctype html>
         state.expiredSubscription = data.expiredSubscription || { tokens: [], nodeNames: ["订阅已过期", "请联系顾问", "续费后恢复"] };
         state.refreshIntervalMinutes = data.refreshIntervalMinutes || 30;
         state.clashConfig = data.clashConfig || state.clashConfig;
+        state.aggregateCustomNodes = Array.isArray(data.aggregateCustomNodes) ? data.aggregateCustomNodes : [];
+        state.aggregateCustomNodePosition = data.aggregateCustomNodePosition || "tail";
         interval.value = state.refreshIntervalMinutes;
         interval.disabled = false;
         setEnabled(true);
@@ -577,13 +614,15 @@ const ADMIN_HTML = `<!doctype html>
         const expiredLinks = aggregateRoot.querySelector("[data-field='expiredLinks']")?.value || "";
         const expiredTokens = expiredLinks.split(/\\r?\\n/).map((item) => item.trim()).filter(Boolean).map((item, index) => publicTokenFromLink(item, index));
         const expiredNodeNames = [0, 1, 2].map((index) => aggregateRoot.querySelector("[data-field='expiredName" + index + "']")?.value.trim() || "");
+        const aggregateCustomNodes = aggregateRoot.querySelector("[data-field='aggregateCustomNodes']")?.value.split(/\\r?\\n/).map((item) => item.trim()).filter(Boolean) || [];
+        const aggregateCustomNodePosition = aggregateRoot.querySelector("[data-field='aggregateCustomNodePosition']")?.value || "tail";
         if (expiredNodeNames.some((name) => !name)) throw new Error("过期提示节点名称不能留空");
         if (subscriptions.length === 0) throw new Error("当前没有订阅配置，请先点击“新增订阅”并填写完整后再保存");
         await api("/api/admin/subscriptions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscriptions, aggregatePublicToken, expiredSubscription: { tokens: expiredTokens, nodeNames: expiredNodeNames } }) });
-        await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value), clashConfig }) });
+        const settingsResult = await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value), clashConfig, aggregateCustomNodes, aggregateCustomNodePosition }) });
         const scope = focusIndex ? "第 " + focusIndex + " 个订阅" : subscriptions.length + " 个订阅";
         await load();
-        setStatus("已保存" + scope + "、Clash 分流配置及刷新间隔到 Cloudflare KV。Clash 分流配置立即用于已发布节点；源订阅节点将在下一次 Cron 刷新或点击“立即刷新”后更新。");
+        setStatus("已保存" + scope + "、Clash 分流配置、刷新间隔及汇总自定义节点到 Cloudflare KV（已识别 " + Number(settingsResult.aggregateCustomNodeCount || 0) + " 个自定义节点）。");
       } catch (error) { setStatus(error.message); }
     }
     document.getElementById("save").onclick = () => saveAll();
@@ -686,6 +725,38 @@ function normalizeRefreshInterval(value, fallback = DEFAULT_REFRESH_INTERVAL_MIN
   return number;
 }
 
+function normalizeAggregateCustomNodes(value) {
+  const values = Array.isArray(value) ? value : String(value ?? "").split(/\r?\n/);
+  return [...new Set(values
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean))]
+    .slice(0, 500);
+}
+
+function normalizeAggregateCustomNodePosition(value) {
+  return String(value ?? "").toLowerCase() === "top" ? "top" : "tail";
+}
+
+function parseAggregateCustomNodes(value) {
+  const lines = normalizeAggregateCustomNodes(value);
+  if (lines.length === 0) return [];
+  const combined = lines.join("\n");
+  try {
+    const parsed = decodeSubscription(combined);
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+  } catch {
+    // Try each line below so one pasted node cannot hide other valid nodes.
+  }
+  return lines.flatMap((line) => {
+    try {
+      const parsed = decodeSubscription(line);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 function createPublicToken() {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (uuid) return uuid.replace(/-/g, "");
@@ -757,7 +828,9 @@ async function loadSettings(env) {
         const parsed = JSON.parse(stored);
         return {
           refreshIntervalMinutes: normalizeRefreshInterval(parsed.refreshIntervalMinutes),
-          clashConfig: normalizeClashConfig(parsed.clashConfig)
+          clashConfig: normalizeClashConfig(parsed.clashConfig),
+          aggregateCustomNodes: normalizeAggregateCustomNodes(parsed.aggregateCustomNodes),
+          aggregateCustomNodePosition: normalizeAggregateCustomNodePosition(parsed.aggregateCustomNodePosition)
         };
       } catch {
         // Fall through to the private environment variable if the setting is corrupt.
@@ -766,7 +839,9 @@ async function loadSettings(env) {
   }
   return {
     refreshIntervalMinutes: normalizeRefreshInterval(env.REFRESH_INTERVAL_MINUTES),
-    clashConfig: normalizeClashConfig(env.CLASH_CONFIG_JSON)
+    clashConfig: normalizeClashConfig(env.CLASH_CONFIG_JSON),
+    aggregateCustomNodes: normalizeAggregateCustomNodes(env.AGGREGATE_CUSTOM_NODES),
+    aggregateCustomNodePosition: normalizeAggregateCustomNodePosition(env.AGGREGATE_CUSTOM_NODE_POSITION)
   };
 }
 
@@ -858,7 +933,9 @@ async function handleAdminApi(request, env, url) {
       aggregatePublicToken,
       expiredSubscription,
       refreshIntervalMinutes: settings.refreshIntervalMinutes,
-      clashConfig: settings.clashConfig
+      clashConfig: settings.clashConfig,
+      aggregateCustomNodes: settings.aggregateCustomNodes,
+      aggregateCustomNodePosition: settings.aggregateCustomNodePosition
     });
   }
   if (url.pathname === "/api/admin/subscriptions" && request.method === "PUT") {
@@ -1012,9 +1089,30 @@ async function handleAdminApi(request, env, url) {
       const clashConfig = Object.prototype.hasOwnProperty.call(body ?? {}, "clashConfig")
         ? normalizeClashConfig(body.clashConfig, true)
         : current.clashConfig;
-      await env.SUBSCRIPTION_STATE.put(ADMIN_SETTINGS_KEY, JSON.stringify({ refreshIntervalMinutes: value, clashConfig }));
-      await reprocessConfiguredProfiles(env, await loadProfiles(env), new Date(), { refreshIntervalMinutes: value, clashConfig });
-      return json({ ok: true, refreshIntervalMinutes: value });
+      const aggregateCustomNodes = Object.prototype.hasOwnProperty.call(body ?? {}, "aggregateCustomNodes")
+        ? normalizeAggregateCustomNodes(body.aggregateCustomNodes)
+        : current.aggregateCustomNodes;
+      const aggregateCustomNodePosition = Object.prototype.hasOwnProperty.call(body ?? {}, "aggregateCustomNodePosition")
+        ? normalizeAggregateCustomNodePosition(body.aggregateCustomNodePosition)
+        : current.aggregateCustomNodePosition;
+      await env.SUBSCRIPTION_STATE.put(ADMIN_SETTINGS_KEY, JSON.stringify({
+        refreshIntervalMinutes: value,
+        clashConfig,
+        aggregateCustomNodes,
+        aggregateCustomNodePosition
+      }));
+      await reprocessConfiguredProfiles(env, await loadProfiles(env), new Date(), {
+        refreshIntervalMinutes: value,
+        clashConfig,
+        aggregateCustomNodes,
+        aggregateCustomNodePosition
+      });
+      return json({
+        ok: true,
+        refreshIntervalMinutes: value,
+        aggregateCustomNodePosition,
+        aggregateCustomNodeCount: parseAggregateCustomNodes(aggregateCustomNodes).length
+      });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "invalid-json" }, 400);
     }
@@ -1355,9 +1453,14 @@ export async function refreshAggregate(env, now = new Date(), profiles = null, s
     const state = await loadState(env, profile.id);
     if (Array.isArray(state?.nodes) && state.nodes.length > 0) nodeGroups.push(state.nodes);
   }
+  const customNodes = parseAggregateCustomNodes(currentSettings.aggregateCustomNodes);
   let candidate;
   try {
-    candidate = await buildAggregateCandidate(nodeGroups, { clashConfig: currentSettings.clashConfig });
+    candidate = await buildAggregateCandidate(nodeGroups, {
+      clashConfig: currentSettings.clashConfig,
+      customNodes,
+      customNodePosition: currentSettings.aggregateCustomNodePosition
+    });
   } catch (error) {
     return { subscriptionId: "all", action: "keep", reason: "aggregate-error", error: error instanceof Error ? error.message : "unknown" };
   }

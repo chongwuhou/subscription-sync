@@ -91,7 +91,19 @@ export async function buildAggregateCandidate(nodeGroups, options = {}) {
       deduped.set(identityWithoutName(node), node);
     }
   }
-  const nodes = sortNodes(deduped.values());
+  const customDeduped = new Map();
+  for (const item of Array.isArray(options.customNodes) ? options.customNodes : []) {
+    const node = normalizeNode(item, []);
+    if (!isValidNode(node)) continue;
+    const identity = identityWithoutName(node);
+    deduped.delete(identity);
+    customDeduped.set(identity, node);
+  }
+  const regularNodes = sortNodes(deduped.values());
+  const customNodes = [...customDeduped.values()];
+  const nodes = String(options.customNodePosition ?? "tail").toLowerCase() === "top"
+    ? [...customNodes, ...regularNodes]
+    : [...regularNodes, ...customNodes];
   const valid = nodes.length >= minValidNodes;
   const clashConfig = normalizeClashConfig(options.clashConfig);
   const canonical = valid ? stableStringify({ nodes, clashConfig }) : null;

@@ -240,6 +240,8 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(pageText, /历史内容版本/);
   assert.match(pageText, /使用此版本/);
   assert.match(pageText, /同时暂停自动更新/);
+  assert.match(pageText, /汇总自定义节点/);
+  assert.match(pageText, /自定义节点位置/);
   assert.match(pageText, /已过期的旧汇总地址/);
   assert.match(pageText, /expiredName/);
   assert.doesNotMatch(pageText, /固定链接路径 Token/);
@@ -281,7 +283,9 @@ test("admin API manages subscriptions and refresh interval without public access
         "proxy-groups": [{ name: "PROXY", type: "select", proxies: ["DIRECT", "{{NODES}}"] }],
         "rule-providers": { ads: { type: "http", behavior: "domain", url: "https://rules.example.com/ads.yaml", path: "./ruleset/ads.yaml" } },
         rules: ["RULE-SET,ads,REJECT", "MATCH,PROXY"]
-      }
+      },
+      aggregateCustomNodes: ["vless://11111111-1111-1111-1111-111111111111@custom.example.com:443?security=tls#Custom"],
+      aggregateCustomNodePosition: "top"
     })
   }), env);
   assert.equal(settings.status, 200);
@@ -300,6 +304,8 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.equal(body.refreshIntervalMinutes, 15);
   assert.equal(body.clashConfig.rules[0], "RULE-SET,ads,REJECT");
   assert.equal(body.clashConfig["rule-providers"].ads.type, "http");
+  assert.deepEqual(body.aggregateCustomNodes, ["vless://11111111-1111-1111-1111-111111111111@custom.example.com:443?security=tls#Custom"]);
+  assert.equal(body.aggregateCustomNodePosition, "top");
   assert.deepEqual(body.expiredSubscription, {
     tokens: ["old-aggregate-token-123456"],
     nodeNames: ["已到期", "请联系顾问", "请改用新地址"]
@@ -360,7 +366,10 @@ test("admin API manages subscriptions and refresh interval without public access
 
   const normalAggregateResponse = await worker.fetch(new Request("https://worker.example.com/sub/new-aggregate-token-123456"), env);
   assert.equal(normalAggregateResponse.status, 200);
-  assert.match(await normalAggregateResponse.text(), /US \| One/);
+  const normalAggregateText = await normalAggregateResponse.text();
+  assert.match(normalAggregateText, /Custom/);
+  assert.match(normalAggregateText, /US \| One/);
+  assert.ok(normalAggregateText.indexOf("Custom") < normalAggregateText.indexOf("US | One"));
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => { throw new Error("source window closed"); };
