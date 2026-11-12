@@ -31,7 +31,10 @@ function identityWithoutName(node) {
 
 export async function buildCandidate(rawText, options = {}) {
   const renameRules = Array.isArray(options.renameRules) ? options.renameRules : [];
-  const minValidNodes = Math.max(1, Number(options.minValidNodes ?? 1));
+  const requestedMinimum = Number(options.minValidNodes ?? 1);
+  const minValidNodes = Number.isFinite(requestedMinimum)
+    ? Math.max(1, Math.floor(requestedMinimum))
+    : 1;
   const parsed = decodeSubscription(rawText);
   const deduped = new Map();
   for (const item of parsed) {
