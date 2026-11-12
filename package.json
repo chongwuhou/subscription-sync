@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/codec.js && node --check src/core.js && node --check src/worker.js"
+    "check": "node --check src/codec.js && node --check src/config.js && node --check src/core.js && node --check src/worker.js"
   },
   "engines": {
     "node": ">=18.18"
