@@ -15,7 +15,9 @@
 - KV：`subscription-sync-state`
 - D1：`subscription-sync-audit`
 
-公开仓库不记录这两个资源的账号 ID；部署时从 Cloudflare 控制台复制 ID 到私有的 Wrangler 配置或绑定设置中。
+生产 `wrangler.toml` 会记录这两个资源的账号 ID 以支持 GitHub 自动部署；这些 ID 不是访问凭据。公开仓库仍不记录任何订阅地址、Token、API 令牌或其他密钥。
+
+生产部署的构建变量 `WRANGLER_SEND_METRICS=false` 已关闭 Wrangler 匿名遥测，`preview_urls = false` 已关闭预览链接。生产固定地址仍使用 `workers.dev`，方便后续生成稳定订阅链接。
 
 D1 是可选项。启用 `SUBSCRIPTION_AUDIT` 后，运行 `migrations/0001_audit.sql`，它只保存刷新时间、动作、原因、有效节点数和内容哈希，不保存原始订阅地址、Token 或生成的订阅正文。
 
