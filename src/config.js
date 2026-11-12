@@ -18,7 +18,7 @@ function normalizeProfile(item, index) {
   const id = String(item.id ?? `subscription-${index + 1}`).trim();
   const sourceUrl = String(item.sourceUrl ?? "").trim();
   const publicToken = String(item.publicToken ?? "").trim();
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) return null;
+  if (!/^[\p{L}\p{N}_-]{1,64}$/u.test(id)) return null;
   if (!sourceUrl || !publicToken || publicToken.includes("/")) return null;
   try {
     const parsedUrl = new URL(sourceUrl);
