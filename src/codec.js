@@ -9,6 +9,7 @@ const SUPPORTED_TYPES = new Set([
   "hysteria",
   "hysteria2",
   "tuic",
+  "anytls",
   "socks5",
   "http"
 ]);
@@ -455,7 +456,7 @@ export function isValidNode(node) {
   if (!SUPPORTED_TYPES.has(node.type)) return false;
   if (!node.server || !Number.isInteger(Number(node.port)) || Number(node.port) < 1 || Number(node.port) > 65535) return false;
   if (["vmess", "vless", "tuic"].includes(node.type) && !node.uuid) return false;
-  if (["trojan", "hysteria2"].includes(node.type) && !node.password) return false;
+  if (["trojan", "hysteria2", "anytls"].includes(node.type) && !node.password) return false;
   if (node.type === "ss" && (!node.cipher || !node.password)) return false;
   return true;
 }
