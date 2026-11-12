@@ -29,6 +29,30 @@ function identityWithoutName(node) {
   return stableStringify(copy);
 }
 
+function sortNodes(nodes) {
+  return [...nodes].sort((left, right) =>
+    `${left.name}\u0000${left.type}\u0000${left.server}\u0000${left.port}`.localeCompare(
+      `${right.name}\u0000${right.type}\u0000${right.server}\u0000${right.port}`
+    )
+  );
+}
+
+export function buildPreview(rawText, options = {}) {
+  const renameRules = Array.isArray(options.renameRules) ? options.renameRules : [];
+  const parsed = decodeSubscription(rawText);
+  const original = new Map();
+  const modified = new Map();
+  for (const item of parsed) {
+    const originalNode = normalizeNode(item, []);
+    const modifiedNode = normalizeNode(item, renameRules);
+    if (!isValidNode(originalNode) || !isValidNode(modifiedNode)) continue;
+    const identity = identityWithoutName(originalNode);
+    original.set(identity, originalNode);
+    modified.set(identity, modifiedNode);
+  }
+  return { original: sortNodes(original.values()), modified: sortNodes(modified.values()) };
+}
+
 export async function buildCandidate(rawText, options = {}) {
   const renameRules = Array.isArray(options.renameRules) ? options.renameRules : [];
   const requestedMinimum = Number(options.minValidNodes ?? 1);
@@ -42,11 +66,7 @@ export async function buildCandidate(rawText, options = {}) {
     if (!isValidNode(node)) continue;
     deduped.set(identityWithoutName(node), node);
   }
-  const nodes = [...deduped.values()].sort((left, right) =>
-    `${left.name}\u0000${left.type}\u0000${left.server}\u0000${left.port}`.localeCompare(
-      `${right.name}\u0000${right.type}\u0000${right.server}\u0000${right.port}`
-    )
-  );
+  const nodes = sortNodes(deduped.values());
   const valid = nodes.length >= minValidNodes;
   const canonical = valid ? stableStringify(nodes) : null;
   const hashFn = options.hashFn ?? sha256Hex;
