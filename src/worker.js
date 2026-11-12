@@ -95,17 +95,40 @@ async function saveState(env, state) {
   await env.SUBSCRIPTION_STATE.put(STATE_KEY, JSON.stringify(state));
 }
 
+async function writeAudit(env, result, now) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare) return;
+  try {
+    await env.SUBSCRIPTION_AUDIT
+      .prepare("INSERT INTO refresh_audit (created_at, action, reason, valid_count, content_hash) VALUES (?, ?, ?, ?, ?)")
+      .bind(
+        now.toISOString(),
+        result.action ?? "unknown",
+        result.reason ?? "unknown",
+        Number(result.validCount ?? 0),
+        result.contentHash ?? null
+      )
+      .run();
+  } catch {
+    // Audit storage is best-effort. It must never replace a valid published state.
+    console.log(JSON.stringify({ event: "audit-write-failed" }));
+  }
+}
+
 export async function refresh(env, now = new Date()) {
-  if (!env.SOURCE_URL) return { action: "keep", reason: "source-not-configured" };
+  const finish = async (result) => {
+    await writeAudit(env, result, now);
+    return result;
+  };
+  if (!env.SOURCE_URL) return finish({ action: "keep", reason: "source-not-configured" });
   if (!env.SUBSCRIPTION_STATE?.get || !env.SUBSCRIPTION_STATE?.put) {
-    return { action: "keep", reason: "state-store-not-configured" };
+    return finish({ action: "keep", reason: "state-store-not-configured" });
   }
   const previous = await loadState(env);
   let rawText;
   try {
     rawText = await fetchSource(env);
   } catch (error) {
-    return { action: "keep", reason: "source-error", error: error instanceof Error ? error.message : "unknown" };
+    return finish({ action: "keep", reason: "source-error", error: error instanceof Error ? error.message : "unknown" });
   }
 
   let candidate;
@@ -115,11 +138,11 @@ export async function refresh(env, now = new Date()) {
       minValidNodes: env.MIN_VALID_NODES ?? 1
     });
   } catch (error) {
-    return { action: "keep", reason: "parse-error", error: error instanceof Error ? error.message : "unknown" };
+    return finish({ action: "keep", reason: "parse-error", error: error instanceof Error ? error.message : "unknown" });
   }
 
   const decision = decidePublication(candidate, previous);
-  if (decision.action === "keep") return decision;
+  if (decision.action === "keep") return finish(decision);
   await saveState(env, {
     version: 1,
     contentHash: decision.contentHash,
@@ -127,7 +150,7 @@ export async function refresh(env, now = new Date()) {
     updatedAt: now.toISOString(),
     output: decision.output
   });
-  return decision;
+  return finish(decision);
 }
 
 async function servePublished(env) {
@@ -155,7 +178,7 @@ export default {
     return new Response("Not found", { status: 404 });
   },
 
-  async scheduled(controller, env, context) {
+  async scheduled(_controller, env) {
     const result = await refresh(env);
     console.log(JSON.stringify({
       event: "subscription-refresh",
