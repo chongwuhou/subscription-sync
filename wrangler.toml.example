@@ -3,8 +3,9 @@ main = "src/worker.js"
 compatibility_date = "2026-01-01"
 
 # This file is an example only. It does not enable any Cloudflare service.
-# Replace the placeholder KV namespace id only after the deployment policy is
-# explicitly approved by the operator.
+# Replace the placeholder KV namespace id with the ID of the approved
+# subscription-sync-state namespace. Keep account-specific IDs out of the
+# public repository when this template is used for a private deployment.
 
 [[kv_namespaces]]
 binding = "SUBSCRIPTION_STATE"
