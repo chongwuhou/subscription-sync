@@ -28,7 +28,7 @@
 
 ## 项目状态
 
-当前还没有填写真实订阅地址，也没有调用 Cloudflare、创建 KV 或执行部署。项目先在本地完成核心逻辑和测试。
+当前还没有填写真实订阅地址，也没有执行 Cloudflare 部署。项目先完成公开源码、核心逻辑和测试；正式接入时使用 KV 保存最后成功版本，D1 仅作为可选的无敏感信息审计日志。
 
 ## 本地检查
 
@@ -50,6 +50,8 @@ npm run check
 - `RENAME_RULES_JSON`：例如 `[{"pattern":"\\s+\\|\\s+","replacement":"-"}]`。
 - `MIN_VALID_NODES`：最低有效节点数，默认 1。
 - `SUBSCRIPTION_STATE`：保存最后一个成功版本的状态存储绑定。
+
+自动刷新和 Cloudflare 配置说明见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
 `wrangler.toml.example` 只作为公开配置模板，不包含真实地址、Token 或命名空间 ID。
 
