@@ -8,6 +8,11 @@ function parseRenameRules(value) {
   }
 }
 
+function normalizeMinValidNodes(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(1, Math.floor(number)) : 1;
+}
+
 function normalizeProfile(item, index) {
   if (!item || typeof item !== "object") return null;
   const id = String(item.id ?? `subscription-${index + 1}`).trim();
@@ -21,7 +26,7 @@ function normalizeProfile(item, index) {
     sourceUrl,
     publicToken,
     renameRules: Array.isArray(item.renameRules) ? item.renameRules : [],
-    minValidNodes: Math.max(1, Number(item.minValidNodes ?? 1))
+    minValidNodes: normalizeMinValidNodes(item.minValidNodes ?? 1)
   };
 }
 
@@ -53,7 +58,7 @@ export function parseSubscriptionProfiles(env) {
     sourceUrl: env.SOURCE_URL,
     publicToken: env.PUBLIC_PATH_TOKEN,
     renameRules: parseRenameRules(env.RENAME_RULES_JSON),
-    minValidNodes: Math.max(1, Number(env.MIN_VALID_NODES ?? 1))
+    minValidNodes: normalizeMinValidNodes(env.MIN_VALID_NODES ?? 1)
   }];
 }
 
