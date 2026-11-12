@@ -31,6 +31,21 @@ test("parses Clash YAML and keeps only structurally valid nodes", async () => {
   assert.match(candidate.output, /proxy-groups:/);
 });
 
+test("accepts AnyTLS nodes in Clash YAML", async () => {
+  const candidate = await buildCandidate(`
+proxies:
+  - name: AnyTLS test
+    type: anytls
+    server: anytls.example.com
+    port: 443
+    password: test-password
+    sni: anytls.example.com
+`);
+  assert.equal(candidate.valid, true);
+  assert.equal(candidate.validCount, 1);
+  assert.match(candidate.output, /type: anytls/);
+});
+
 test("builds an original and renamed preview without dropping valid nodes", () => {
   const preview = buildPreview(sampleClash, {
     renameRules: [{ pattern: "\\s*\\|\\s*", replacement: "-" }]
