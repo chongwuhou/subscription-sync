@@ -18,6 +18,7 @@
 10. 对外提供每个源的固定链接，更新内容时不要求客户端更换订阅地址。
 11. 同一固定链接根据客户端 User-Agent 自动适配 Clash/Mihomo、Base64 分享链接或 sing-box，也支持 `?target=` 强制指定格式。
 12. 不发送邮件、不上传订阅内容到分析服务、不记录 Token、不接受公开源地址参数。
+13. 每次抓取到满足最低有效节点数的源节点快照都会保存到 D1；源站暂时不可用时，从最近有效快照重新套用当前改名和 Clash 配置。
 13. Clash/Mihomo 配置可在后台统一维护代理组、Rule Providers 和 `rules`；代理组中的 `{{NODES}}` 会自动展开为当前有效节点。
 
 ## 开源与后门审查
@@ -32,7 +33,7 @@
 
 ## 项目状态
 
-当前还没有填写真实订阅地址。Worker 已通过 GitHub 自动部署到 `https://subscription-sync.chongwuhou.workers.dev`，并绑定 `subscription-sync-state` KV、`subscription-sync-audit` D1 和每 5 分钟基础 Cron；实际刷新间隔可在管理员后台设置，默认每 30 分钟。健康检查会返回未配置状态，不会主动抓取任何地址。
+Worker 已通过 GitHub 自动部署到 `https://subscription-sync.chongwuhou.workers.dev`，并绑定 `subscription-sync-state` KV、`subscription-sync-audit` D1 和每 5 分钟基础 Cron；实际刷新间隔可在管理员后台设置，默认每 30 分钟。D1 的 `source_snapshots` 表保存每个源的历史有效节点快照，按源内容哈希去重，不会因短暂源站失联而丢失可用数据。
 
 ## 本地检查
 
