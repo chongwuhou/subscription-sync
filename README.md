@@ -29,7 +29,7 @@
 
 ## 项目状态
 
-当前还没有填写真实订阅地址，也没有执行 Cloudflare 部署。项目先完成公开源码、核心逻辑和测试；正式接入时使用 KV 保存最后成功版本，D1 仅作为可选的无敏感信息审计日志。
+当前还没有填写真实订阅地址，也没有发布 Worker。公开源码、核心逻辑和测试已经完成；Cloudflare 账户中已预留名为 `subscription-sync-state` 的 KV 和 `subscription-sync-audit` 的 D1，Worker 接入 GitHub 仍需在已登录的 Cloudflare/GitHub 会话中完成授权。
 
 ## 本地检查
 
