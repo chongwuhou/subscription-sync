@@ -10,6 +10,13 @@
 - 一个 KV namespace，绑定名为 `SUBSCRIPTION_STATE`
 - 一个 Cron Trigger，示例配置为每 30 分钟刷新
 
+本项目当前已在目标 Cloudflare 账户中创建：
+
+- KV：`subscription-sync-state`
+- D1：`subscription-sync-audit`
+
+公开仓库不记录这两个资源的账号 ID；部署时从 Cloudflare 控制台复制 ID 到私有的 Wrangler 配置或绑定设置中。
+
 D1 是可选项。启用 `SUBSCRIPTION_AUDIT` 后，运行 `migrations/0001_audit.sql`，它只保存刷新时间、动作、原因、有效节点数和内容哈希，不保存原始订阅地址、Token 或生成的订阅正文。
 
 ## 多订阅配置
