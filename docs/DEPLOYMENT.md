@@ -8,7 +8,7 @@
 
 - 一个 Cloudflare Worker
 - 一个 KV namespace，绑定名为 `SUBSCRIPTION_STATE`
-- 一个 Cron Trigger，示例配置为每 30 分钟刷新
+- 一个 Cron Trigger，基础触发频率为每 5 分钟；实际刷新间隔由后台设置控制，默认每 30 分钟
 
 本项目当前已在目标 Cloudflare 账户中创建：
 
@@ -58,11 +58,15 @@ Worker 为每个 `id` 使用独立的 KV key：`published-state-v1:<id>`，公�
 - `SOURCE_URL`：真实订阅地址，建议作为 Worker Secret。
 - `PUBLIC_PATH_TOKEN`：通用订阅链接中的随机路径片段，建议作为 Worker Secret。
 - `RENAME_RULES_JSON`：节点重命名规则；不含敏感信息时可以作为变量，但建议仍然单独配置。
+- `ADMIN_TOKEN`：管理员后台令牌，必须作为 Worker Secret；没有它时 `/api/admin/*` 返回不可用。
 
 可选配置：
 
 - `MIN_VALID_NODES`：默认 `1`。
 - `DEFAULT_TARGET`：无法识别客户端时的默认格式，默认 `clash`。
+- `REFRESH_INTERVAL_MINUTES`：后台尚未保存设置时的刷新间隔，5-1440 分钟，按 5 分钟递增，默认 `30`。
+
+部署后访问 `/admin`，输入 `ADMIN_TOKEN` 即可管理多个源和刷新间隔。后台保存的订阅配置写入受保护的 KV；管理员 API 不接受公开源地址参数，且不把源地址写入日志。
 - `SOURCE_TIMEOUT_MS`：默认 `15000`。
 - `MAX_SOURCE_BYTES`：默认 `5242880`。
 - `ALLOW_HTTP_SOURCE=true`：只有上游确实没有 HTTPS 时才启用。
