@@ -123,6 +123,17 @@ test("multiple subscriptions have isolated state", async () => {
     assert.equal(backupResponse.status, 200);
     assert.match(await mainResponse.text(), /one.example.com/);
     assert.match(await backupResponse.text(), /backup.example.com/);
+
+    const base64Response = await worker.fetch(new Request("https://worker.example.com/sub/main-token", {
+      headers: { "user-agent": "Shadowrocket/2.2" }
+    }), env);
+    assert.equal(base64Response.status, 200);
+    assert.equal(base64Response.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.match(atob((await base64Response.text()).trim()), /vmess:\/\//);
+
+    const singBoxResponse = await worker.fetch(new Request("https://worker.example.com/sub/main-token?target=sing-box"), env);
+    assert.equal(singBoxResponse.status, 200);
+    assert.equal(JSON.parse(await singBoxResponse.text()).outbounds[0].tag, "PROXY");
   } finally {
     globalThis.fetch = originalFetch;
   }
