@@ -76,6 +76,13 @@ const ADMIN_HTML = `<!doctype html>
     }
     function render() {
       root.replaceChildren();
+      if (state.profiles.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "muted";
+        empty.textContent = "当前没有保存的订阅。请先点击“新增订阅”，填写 ID、名称、源头订阅地址和固定链接 Token，再点击“保存订阅配置”。";
+        root.appendChild(empty);
+        return;
+      }
       state.profiles.forEach((profile, index) => {
         const card = document.createElement("fieldset");
         const legend = document.createElement("legend");
@@ -170,6 +177,7 @@ const ADMIN_HTML = `<!doctype html>
     async function saveAll(focusIndex = null) {
       try {
         const subscriptions = collect();
+        if (subscriptions.length === 0) throw new Error("当前没有订阅配置，请先点击“新增订阅”并填写完整后再保存");
         await api("/api/admin/subscriptions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscriptions }) });
         await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value) }) });
         const scope = focusIndex ? "第 " + focusIndex + " 个订阅" : subscriptions.length + " 个订阅";
