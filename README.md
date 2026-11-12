@@ -8,7 +8,7 @@
 
 1. 原始订阅地址只从私有配置读取，不写入源码。
 2. 定时抓取原始订阅。
-3. 支持常见 Clash YAML、JSON、Base64 分享链接格式。
+3. 支持常见 Clash YAML、JSON、Base64 分享链接格式，并覆盖 VMess、VLESS、Trojan、SS、SSR、Hysteria2、TUIC、HTTP/SOCKS5 等常见节点类型。
 4. 按用户配置的正则规则改名。
 5. 自动去重、排序并生成 Clash/Mihomo YAML。
 6. 新内容有至少一个有效节点且哈希发生变化时才更新。
@@ -39,7 +39,7 @@ npm test
 npm run check
 ```
 
-核心逻辑不需要访问网络。测试使用内置 Node.js 测试运行器。
+核心逻辑不需要访问网络。测试使用内置 Node.js 测试运行器，覆盖解析、重命名、去重、哈希变更门禁、空节点保护和 Worker 刷新流程。
 
 ## 配置概念
 
