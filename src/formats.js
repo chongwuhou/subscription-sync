@@ -206,10 +206,10 @@ function renderSingBox(nodes) {
   }, null, 2)}\n`;
 }
 
-export function renderSubscription(nodes, target = "clash") {
+export function renderSubscription(nodes, target = "clash", clashConfig) {
   const normalized = normalizeTarget(target);
   if (!normalized) throw new Error("Unsupported subscription target");
-  if (normalized === "clash") return { body: renderClashYaml(nodes), contentType: "text/yaml; charset=utf-8" };
+  if (normalized === "clash") return { body: renderClashYaml(nodes, clashConfig), contentType: "text/yaml; charset=utf-8" };
   const links = nodes.map(nodeToShareLink).filter(Boolean);
   if (normalized === "links") {
     if (links.length === 0) throw new Error("No nodes can be rendered as share links");
