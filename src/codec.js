@@ -408,7 +408,10 @@ export function decodeSubscription(input) {
 
 export function applyRename(name, renameRules = []) {
   let result = String(name ?? "").trim();
-  for (const rule of renameRules) {
+  const rules = Array.isArray(renameRules)
+    ? renameRules.reduce((items, rule) => items.concat(Array.isArray(rule) ? rule : [rule]), [])
+    : [];
+  for (const rule of rules) {
     if (!rule || typeof rule.pattern !== "string") continue;
     try {
       const flags = typeof rule.flags === "string" ? rule.flags : "g";
