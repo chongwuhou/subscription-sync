@@ -423,12 +423,28 @@ export function applyRename(name, renameRules = []) {
   return result.trim();
 }
 
-export function normalizeNode(input, renameRules = []) {
+function replaceTextFields(value, renameRules) {
+  if (typeof value === "string") return applyRename(value, renameRules);
+  if (Array.isArray(value)) return value.map((item) => replaceTextFields(item, renameRules));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replaceTextFields(item, renameRules)]));
+  }
+  return value;
+}
+
+export function normalizeNode(input, renameRules = [], options = {}) {
   const node = { ...input };
+  const replaceAllFields = options.replaceAllFields === true;
+  if (replaceAllFields) {
+    Object.assign(node, replaceTextFields(node, renameRules));
+  }
   node.type = String(node.type ?? "").toLowerCase();
   node.server = String(node.server ?? "").trim();
   node.port = Number(node.port);
-  node.name = applyRename(node.name || `${node.type}-${node.server}`, renameRules) || `${node.type}-${node.server}`;
+  const fallbackName = `${node.type}-${node.server}`;
+  node.name = replaceAllFields
+    ? String(node.name ?? fallbackName).trim() || fallbackName
+    : applyRename(node.name || fallbackName, renameRules) || fallbackName;
   return Object.fromEntries(Object.entries(node).filter(([, value]) => value !== undefined));
 }
 
