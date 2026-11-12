@@ -72,6 +72,7 @@ export async function buildAggregateCandidate(nodeGroups, options = {}) {
   const valid = nodes.length >= minValidNodes;
   const clashConfig = normalizeClashConfig(options.clashConfig);
   const canonical = valid ? stableStringify({ nodes, clashConfig }) : null;
+  const sourceContentHash = valid ? await (options.hashFn ?? sha256Hex)(stableStringify(nodes)) : null;
   const hashFn = options.hashFn ?? sha256Hex;
   const contentHash = valid ? await hashFn(canonical) : null;
   return {
@@ -79,38 +80,52 @@ export async function buildAggregateCandidate(nodeGroups, options = {}) {
     validCount: nodes.length,
     minValidNodes,
     contentHash,
+    sourceContentHash,
     nodes,
+    sourceNodes: nodes,
     output: valid ? renderClashYaml(nodes, clashConfig) : null
   };
 }
 
-export async function buildCandidate(rawText, options = {}) {
+export async function buildCandidateFromNodes(sourceNodes, options = {}) {
   const renameRules = Array.isArray(options.renameRules) ? options.renameRules : [];
   const requestedMinimum = Number(options.minValidNodes ?? 1);
   const minValidNodes = Number.isFinite(requestedMinimum)
     ? Math.max(1, Math.floor(requestedMinimum))
     : 1;
-  const parsed = decodeSubscription(rawText);
+  const sourceDeduped = new Map();
   const deduped = new Map();
-  for (const item of parsed) {
-    const node = normalizeNode(item, renameRules, { replaceAllFields: options.replaceAllFields === true });
+  for (const item of Array.isArray(sourceNodes) ? sourceNodes : []) {
+    const sourceNode = normalizeNode(item, []);
+    if (!isValidNode(sourceNode)) continue;
+    sourceDeduped.set(identityWithoutName(sourceNode), sourceNode);
+    const node = normalizeNode(sourceNode, renameRules, { replaceAllFields: options.replaceAllFields === true });
     if (!isValidNode(node)) continue;
     deduped.set(identityWithoutName(node), node);
   }
+  const historicalNodes = sortNodes(sourceDeduped.values());
   const nodes = sortNodes(deduped.values());
   const valid = nodes.length >= minValidNodes;
   const clashConfig = normalizeClashConfig(options.clashConfig);
   const canonical = valid ? stableStringify({ nodes, clashConfig }) : null;
   const hashFn = options.hashFn ?? sha256Hex;
   const contentHash = valid ? await hashFn(canonical) : null;
+  const sourceContentHash = valid ? await hashFn(stableStringify(historicalNodes)) : null;
   return {
     valid,
     validCount: nodes.length,
     minValidNodes,
     contentHash,
+    sourceContentHash,
+    sourceNodes: historicalNodes,
     nodes,
     output: valid ? renderClashYaml(nodes, clashConfig) : null
   };
+}
+
+export async function buildCandidate(rawText, options = {}) {
+  const parsed = decodeSubscription(rawText);
+  return buildCandidateFromNodes(parsed, options);
 }
 
 export function decidePublication(candidate, previous) {
@@ -123,6 +138,8 @@ export function decidePublication(candidate, previous) {
       reason: "unchanged",
       validCount: candidate.validCount,
       contentHash: candidate.contentHash,
+      sourceContentHash: candidate.sourceContentHash,
+      sourceNodes: candidate.sourceNodes,
       nodes: candidate.nodes
     };
   }
@@ -131,6 +148,8 @@ export function decidePublication(candidate, previous) {
     reason: previous?.output ? "changed" : "first-valid-version",
     validCount: candidate.validCount,
     contentHash: candidate.contentHash,
+    sourceContentHash: candidate.sourceContentHash,
+    sourceNodes: candidate.sourceNodes,
     nodes: candidate.nodes,
     output: candidate.output
   };
