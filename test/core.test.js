@@ -46,6 +46,37 @@ proxies:
   assert.match(candidate.output, /type: anytls/);
 });
 
+test("filters source names before rename and keeps the unfiltered history", async () => {
+  const candidate = await buildCandidate(`
+proxies:
+  - name: 美国 VIP2 到期
+    type: anytls
+    server: expired.example.com
+    port: 443
+    password: expired
+  - name: 美国 VIP2
+    type: anytls
+    server: active.example.com
+    port: 443
+    password: active
+  - name: 日本普通节点
+    type: anytls
+    server: jp.example.com
+    port: 443
+    password: jp
+`, {
+    nodeNameInclude: "美国|VIP2",
+    nodeNameExclude: "到期|续费",
+    renameRules: [{ pattern: "美国", replacement: "US" }]
+  });
+  assert.equal(candidate.sourceValidCount, 3);
+  assert.equal(candidate.sourceNodes.length, 3);
+  assert.equal(candidate.validCount, 1);
+  assert.equal(candidate.nodes[0].name, "US VIP2");
+  assert.match(candidate.output, /active\.example\.com/);
+  assert.doesNotMatch(candidate.output, /expired\.example\.com|jp\.example\.com/);
+});
+
 test("builds an original and renamed preview without dropping valid nodes", () => {
   const preview = buildPreview(sampleClash, {
     renameRules: [{ pattern: "\\s*\\|\\s*", replacement: "-" }]

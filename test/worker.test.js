@@ -236,6 +236,8 @@ test("admin API manages subscriptions and refresh interval without public access
         name: "主订阅",
         sourceUrl: "https://source.example.com/sub?token=REDACTED",
         renameRules: [],
+        nodeNameInclude: "US|VIP2",
+        nodeNameExclude: "到期|续费",
         minValidNodes: 1,
         defaultTarget: "base64"
       }]
@@ -263,6 +265,8 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.equal(body.subscriptions[0].sourceUrl, "https://source.example.com/sub?token=REDACTED");
   assert.match(body.subscriptions[0].publicToken, /^[A-Za-z0-9_-]{24,64}$/);
   assert.deepEqual(body.subscriptions[0].renameRules, []);
+  assert.equal(body.subscriptions[0].nodeNameInclude, "US|VIP2");
+  assert.equal(body.subscriptions[0].nodeNameExclude, "到期|续费");
   assert.match(body.aggregatePublicToken, /^[A-Za-z0-9_-]{24,64}$/);
   assert.equal(body.subscriptions[0].minValidNodes, 1);
   assert.equal(body.refreshIntervalMinutes, 15);

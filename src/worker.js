@@ -53,7 +53,7 @@ const ADMIN_HTML = `<!doctype html>
 </head>
 <body>
   <h1>Subscription Sync 管理</h1>
-  <p class="muted">管理源头订阅地址、节点改名规则、最低有效节点数和客户端输出格式。配置只保存到受保护的 Cloudflare KV，不保存在浏览器。</p>
+  <p class="muted">管理源头订阅地址、节点过滤、节点改名规则、最低有效节点数和客户端输出格式。配置只保存到受保护的 Cloudflare KV，不保存在浏览器。</p>
   <p><button id="login">输入管理员令牌</button> <button id="reload" disabled>重新读取</button> <button id="save" disabled>保存订阅配置</button> <button id="refresh" disabled>立即刷新</button> <button id="add" disabled>新增订阅</button></p>
   <label>自动刷新间隔（分钟，5-1440，按 5 分钟粒度）<input id="interval" type="number" min="5" max="1440" step="5" value="30" disabled></label>
   <p class="notice">保存后，订阅地址、改名规则、Clash 分流配置和刷新间隔会写入 Cloudflare KV；Clash 分流配置在下一次请求时生效，源订阅节点在下一次定时刷新或点击“立即刷新”后更新。源站临时不可用时使用 D1 最近一次有效快照并重新套用当前规则。只有管理员令牌可以读取源地址。</p>
@@ -288,6 +288,12 @@ const ADMIN_HTML = `<!doctype html>
         };
         card.appendChild(copyLink);
         addField(card, "minValidNodes", "最低有效节点数", profile.minValidNodes || 1, "number");
+        addField(card, "nodeNameInclude", "节点名称保留（可选；多个关键词用 | 分隔，例如：美国|VIP2）", profile.nodeNameInclude || "", "text", "留空表示不限制");
+        addField(card, "nodeNameExclude", "节点名称排除（可选；多个关键词用 | 分隔，例如：到期|续费）", profile.nodeNameExclude || "", "text", "留空表示不排除");
+        const filterHelp = document.createElement("p");
+        filterHelp.className = "muted";
+        filterHelp.textContent = "处理顺序：先按原始节点名称过滤，再执行改名规则；关键词是不区分大小写的名称包含匹配。两项都留空就是不过滤。";
+        card.appendChild(filterHelp);
         addField(card, "defaultTarget", "无法识别客户端时的格式（clash/base64/sing-box/links）", profile.defaultTarget || "clash", "text", "clash");
         addCheckbox(card, "replaceAllFields", "允许替换节点全部字段（高级；默认只替换名称）", profile.replaceAllFields);
         addField(card, "renameRules", "改名规则 JSON", JSON.stringify(profile.renameRules || [], null, 2), "textarea", '[{"pattern":"\\\\s*\\\\|\\\\s*","replacement":"-"}]');
@@ -311,7 +317,9 @@ const ADMIN_HTML = `<!doctype html>
           try {
             const renameRules = parseRenameRulesInput(card.querySelector("[data-field='renameRules']").value, index);
             const replaceAllFields = card.querySelector("[data-field='replaceAllFields']").checked;
-            const data = await api("/api/admin/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.id, renameRules, replaceAllFields }) });
+            const nodeNameInclude = card.querySelector("[data-field='nodeNameInclude']").value;
+            const nodeNameExclude = card.querySelector("[data-field='nodeNameExclude']").value;
+            const data = await api("/api/admin/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.id, renameRules, replaceAllFields, nodeNameInclude, nodeNameExclude }) });
             renderPreviewPane(previewGrid, "原版", data.original || []);
             renderPreviewPane(previewGrid, "规则修改后", data.modified || []);
             setStatus((data.source === "history" ? "源头暂不可用，已使用 D1 历史快照" : "已读取当前源头") + "加载预览；默认只替换名称。需要长期生效请点击“保存本订阅”或“保存订阅配置”");
@@ -354,6 +362,8 @@ const ADMIN_HTML = `<!doctype html>
           sourceUrl,
           publicToken,
           replaceAllFields: checked("replaceAllFields"),
+          nodeNameInclude: value("nodeNameInclude").trim(),
+          nodeNameExclude: value("nodeNameExclude").trim(),
           minValidNodes: Number(value("minValidNodes")),
           defaultTarget: value("defaultTarget").trim(),
           renameRules
@@ -382,7 +392,7 @@ const ADMIN_HTML = `<!doctype html>
     };
     document.getElementById("reload").onclick = load;
     document.getElementById("add").onclick = () => {
-      state.profiles.push({ id: "", name: "", sourceUrl: "", publicToken: "", replaceAllFields: false, minValidNodes: 1, defaultTarget: "clash", renameRules: [] });
+      state.profiles.push({ id: "", name: "", sourceUrl: "", publicToken: "", nodeNameInclude: "", nodeNameExclude: "", replaceAllFields: false, minValidNodes: 1, defaultTarget: "clash", renameRules: [] });
       render();
     };
     async function saveAll(focusIndex = null) {
@@ -691,20 +701,24 @@ async function handleAdminApi(request, env, url) {
       const settings = await loadSettings(env);
       const candidate = await buildCandidate(content, {
         renameRules: profile.renameRules,
+        nodeNameInclude: profile.nodeNameInclude,
+        nodeNameExclude: profile.nodeNameExclude,
         replaceAllFields: profile.replaceAllFields,
         minValidNodes: profile.minValidNodes,
         clashConfig: settings.clashConfig
       });
-      if (!candidate.valid) {
-        return json({ error: "uploaded-source-has-no-valid-nodes", validCount: candidate.validCount }, 400);
+      if (!candidate.sourceValidCount) {
+        return json({ error: "uploaded-source-has-no-valid-nodes", validCount: 0 }, 400);
       }
       const capturedAt = new Date();
       const storedInD1 = await writeSourceSnapshot(env, profile.id, candidate, capturedAt);
       const previous = await loadState(env, profile.id);
-      const decision = await publishDecision(env, profile.id, decidePublication(candidate, previous), capturedAt, {
+      const decision = candidate.valid
+        ? await publishDecision(env, profile.id, decidePublication(candidate, previous), capturedAt, {
         sourceOrigin: "manual-upload",
         sourceSnapshotAt: capturedAt.toISOString()
-      });
+        })
+        : { action: "keep", reason: "filters-produced-no-valid-nodes", validCount: 0 };
       const profiles = await loadProfiles(env);
       const aggregate = await refreshAggregate(env, capturedAt, profiles, settings);
       return json({
@@ -712,6 +726,7 @@ async function handleAdminApi(request, env, url) {
         subscriptionId: profile.id,
         action: decision.action,
         validCount: candidate.validCount,
+        sourceValidCount: candidate.sourceValidCount,
         storage: storedInD1 ? "d1" : "kv-fallback",
         aggregateAction: aggregate.action
       });
@@ -745,11 +760,13 @@ async function handleAdminApi(request, env, url) {
       if (!profile) return json({ error: "subscription-not-found" }, 404);
       const renameRules = Array.isArray(body?.renameRules) ? body.renameRules : profile.renameRules;
       const replaceAllFields = typeof body?.replaceAllFields === "boolean" ? body.replaceAllFields : profile.replaceAllFields;
+      const nodeNameInclude = typeof body?.nodeNameInclude === "string" ? body.nodeNameInclude : profile.nodeNameInclude;
+      const nodeNameExclude = typeof body?.nodeNameExclude === "string" ? body.nodeNameExclude : profile.nodeNameExclude;
       let preview;
       let source = "live";
       try {
         const rawText = await fetchSource(env, profile);
-        preview = buildPreview(rawText, { renameRules, replaceAllFields });
+        preview = buildPreview(rawText, { renameRules, replaceAllFields, nodeNameInclude, nodeNameExclude });
         if (preview.original.length === 0 || preview.modified.length === 0) throw new Error("latest-source-has-no-valid-nodes");
       } catch (liveError) {
         const historicalNodes = await loadLatestSourceSnapshot(env, profile.id);
@@ -760,7 +777,7 @@ async function handleAdminApi(request, env, url) {
             ? state.sourceNodes
             : state?.nodes;
         if (!fallbackNodes?.length) throw liveError;
-        preview = buildPreviewFromNodes(fallbackNodes, { renameRules, replaceAllFields });
+        preview = buildPreviewFromNodes(fallbackNodes, { renameRules, replaceAllFields, nodeNameInclude, nodeNameExclude });
         if (preview.original.length === 0 || preview.modified.length === 0) throw liveError;
         source = "history";
       }
@@ -812,13 +829,14 @@ async function publishDecision(env, profileId, decision, now, metadata = {}) {
 }
 
 async function writeSourceSnapshot(env, profileId, candidate, now) {
-  if (!env.SUBSCRIPTION_AUDIT?.prepare || !candidate?.valid || !candidate.sourceContentHash) return false;
+  if (!env.SUBSCRIPTION_AUDIT?.prepare || !candidate?.sourceContentHash) return false;
   try {
     if (!await ensureSourceSnapshotSchema(env)) return false;
     const nodes = Array.isArray(candidate.sourceNodes) ? candidate.sourceNodes : [];
+    if (nodes.length === 0) return false;
     await env.SUBSCRIPTION_AUDIT
       .prepare("INSERT OR IGNORE INTO source_snapshots (subscription_id, captured_at, source_content_hash, valid_count, nodes_json) VALUES (?, ?, ?, ?, ?)")
-      .bind(profileId, now.toISOString(), candidate.sourceContentHash, candidate.validCount, JSON.stringify(nodes))
+      .bind(profileId, now.toISOString(), candidate.sourceContentHash, candidate.sourceValidCount ?? nodes.length, JSON.stringify(nodes))
       .run();
     return true;
   } catch {
@@ -910,6 +928,8 @@ async function reprocessStoredProfile(env, profile, now, settings, previous = nu
   try {
     const candidate = await buildCandidateFromNodes(historicalNodes, {
       renameRules: profile.renameRules,
+      nodeNameInclude: profile.nodeNameInclude,
+      nodeNameExclude: profile.nodeNameExclude,
       replaceAllFields: profile.replaceAllFields,
       minValidNodes: profile.minValidNodes,
       clashConfig: settings.clashConfig
@@ -968,6 +988,8 @@ async function refreshProfile(env, profile, now, settings = null) {
   try {
     candidate = await buildCandidate(rawText, {
       renameRules: profile.renameRules,
+      nodeNameInclude: profile.nodeNameInclude,
+      nodeNameExclude: profile.nodeNameExclude,
       replaceAllFields: profile.replaceAllFields,
       minValidNodes: profile.minValidNodes,
       clashConfig: currentSettings.clashConfig
@@ -981,7 +1003,7 @@ async function refreshProfile(env, profile, now, settings = null) {
     } : fallback);
   }
 
-  if (candidate.valid) await writeSourceSnapshot(env, profile.id, candidate, now);
+  if (candidate.sourceValidCount > 0) await writeSourceSnapshot(env, profile.id, candidate, now);
   const decision = decidePublication(candidate, previous);
   if (!candidate.valid) {
     const fallback = await reprocessStoredProfile(env, profile, now, currentSettings, previous, "latest-invalid-use-last-good");

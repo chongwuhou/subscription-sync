@@ -13,6 +13,11 @@ function normalizeMinValidNodes(value) {
   return Number.isFinite(number) ? Math.max(1, Math.floor(number)) : 1;
 }
 
+function normalizeNodeNameFilter(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item ?? "").trim()).filter(Boolean).join("|");
+  return String(value ?? "").trim();
+}
+
 function normalizeProfile(item, index) {
   if (!item || typeof item !== "object") return null;
   const id = String(item.id ?? `subscription-${index + 1}`).trim();
@@ -32,6 +37,8 @@ function normalizeProfile(item, index) {
     sourceUrl,
     publicToken,
     renameRules: Array.isArray(item.renameRules) ? item.renameRules : [],
+    nodeNameInclude: normalizeNodeNameFilter(item.nodeNameInclude),
+    nodeNameExclude: normalizeNodeNameFilter(item.nodeNameExclude),
     replaceAllFields: item.replaceAllFields === true,
     minValidNodes: normalizeMinValidNodes(item.minValidNodes ?? 1),
     defaultTarget: String(item.defaultTarget ?? "clash").trim() || "clash"
@@ -88,6 +95,8 @@ export function parseSubscriptionProfiles(env) {
     sourceUrl: env.SOURCE_URL,
     publicToken: env.PUBLIC_PATH_TOKEN,
     renameRules: parseRenameRules(env.RENAME_RULES_JSON),
+    nodeNameInclude: normalizeNodeNameFilter(env.INCLUDE_NODE_NAMES),
+    nodeNameExclude: normalizeNodeNameFilter(env.EXCLUDE_NODE_NAMES),
     replaceAllFields: String(env.REPLACE_ALL_FIELDS ?? "").toLowerCase() === "true",
     minValidNodes: normalizeMinValidNodes(env.MIN_VALID_NODES ?? 1),
     defaultTarget: String(env.DEFAULT_TARGET ?? "clash").trim() || "clash"

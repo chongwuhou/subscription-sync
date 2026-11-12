@@ -38,6 +38,23 @@ function sortNodes(nodes) {
   );
 }
 
+function filterTerms(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+  return String(value ?? "")
+    .split(/[|,，\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function matchesNodeNameFilter(name, options = {}) {
+  const normalizedName = String(name ?? "").toLocaleLowerCase();
+  const include = filterTerms(options.nodeNameInclude).map((item) => item.toLocaleLowerCase());
+  const exclude = filterTerms(options.nodeNameExclude).map((item) => item.toLocaleLowerCase());
+  if (include.length > 0 && !include.some((term) => normalizedName.includes(term))) return false;
+  if (exclude.some((term) => normalizedName.includes(term))) return false;
+  return true;
+}
+
 export function buildPreviewFromNodes(sourceNodes, options = {}) {
   const renameRules = Array.isArray(options.renameRules) ? options.renameRules : [];
   const replaceAllFields = options.replaceAllFields === true;
@@ -46,6 +63,7 @@ export function buildPreviewFromNodes(sourceNodes, options = {}) {
   for (const item of Array.isArray(sourceNodes) ? sourceNodes : []) {
     const originalNode = normalizeNode(item, []);
     const modifiedNode = normalizeNode(item, renameRules, { replaceAllFields });
+    if (!matchesNodeNameFilter(originalNode.name, options)) continue;
     if (!isValidNode(originalNode) || !isValidNode(modifiedNode)) continue;
     const identity = identityWithoutName(originalNode);
     original.set(identity, originalNode);
@@ -102,6 +120,7 @@ export async function buildCandidateFromNodes(sourceNodes, options = {}) {
     const sourceNode = normalizeNode(item, []);
     if (!isValidNode(sourceNode)) continue;
     sourceDeduped.set(identityWithoutName(sourceNode), sourceNode);
+    if (!matchesNodeNameFilter(sourceNode.name, options)) continue;
     const node = normalizeNode(sourceNode, renameRules, { replaceAllFields: options.replaceAllFields === true });
     if (!isValidNode(node)) continue;
     deduped.set(identityWithoutName(node), node);
@@ -113,10 +132,11 @@ export async function buildCandidateFromNodes(sourceNodes, options = {}) {
   const canonical = valid ? stableStringify({ nodes, clashConfig }) : null;
   const hashFn = options.hashFn ?? sha256Hex;
   const contentHash = valid ? await hashFn(canonical) : null;
-  const sourceContentHash = valid ? await hashFn(stableStringify(historicalNodes)) : null;
+  const sourceContentHash = historicalNodes.length > 0 ? await hashFn(stableStringify(historicalNodes)) : null;
   return {
     valid,
     validCount: nodes.length,
+    sourceValidCount: historicalNodes.length,
     minValidNodes,
     contentHash,
     sourceContentHash,
