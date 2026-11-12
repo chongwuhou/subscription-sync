@@ -20,6 +20,12 @@ function normalizeProfile(item, index) {
   const publicToken = String(item.publicToken ?? "").trim();
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) return null;
   if (!sourceUrl || !publicToken || publicToken.includes("/")) return null;
+  try {
+    const parsedUrl = new URL(sourceUrl);
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) return null;
+  } catch {
+    return null;
+  }
   return {
     id,
     name: String(item.name ?? id).trim() || id,
@@ -31,25 +37,47 @@ function normalizeProfile(item, index) {
   };
 }
 
+function parseProfiles(value, strict = false) {
+  let raw;
+  try {
+    raw = typeof value === "string" ? JSON.parse(value) : value;
+  } catch {
+    return strict ? { profiles: null, error: "SUBSCRIPTIONS_JSON must be valid JSON" } : [];
+  }
+  if (!Array.isArray(raw)) {
+    return strict ? { profiles: null, error: "subscriptions must be an array" } : [];
+  }
+  const profiles = [];
+  const ids = new Set();
+  const tokens = new Set();
+  for (let index = 0; index < raw.length; index += 1) {
+    const profile = normalizeProfile(raw[index], index);
+    if (!profile) {
+      if (strict) return { profiles: null, error: `invalid subscription at index ${index}` };
+      continue;
+    }
+    if (ids.has(profile.id) || tokens.has(profile.publicToken)) {
+      if (strict) return { profiles: null, error: `duplicate id or publicToken at index ${index}` };
+      continue;
+    }
+    ids.add(profile.id);
+    tokens.add(profile.publicToken);
+    profiles.push(profile);
+  }
+  return strict ? { profiles, error: null } : profiles;
+}
+
+export function parseSubscriptionProfilesJson(value) {
+  return parseProfiles(value, false);
+}
+
+export function validateSubscriptionProfiles(value) {
+  return parseProfiles(value, true);
+}
+
 export function parseSubscriptionProfiles(env) {
   if (env.SUBSCRIPTIONS_JSON) {
-    try {
-      const raw = JSON.parse(env.SUBSCRIPTIONS_JSON);
-      if (!Array.isArray(raw)) return [];
-      const profiles = [];
-      const ids = new Set();
-      const tokens = new Set();
-      for (let index = 0; index < raw.length; index += 1) {
-        const profile = normalizeProfile(raw[index], index);
-        if (!profile || ids.has(profile.id) || tokens.has(profile.publicToken)) continue;
-        ids.add(profile.id);
-        tokens.add(profile.publicToken);
-        profiles.push(profile);
-      }
-      return profiles;
-    } catch {
-      return [];
-    }
+    return parseSubscriptionProfilesJson(env.SUBSCRIPTIONS_JSON);
   }
 
   if (!env.SOURCE_URL || !env.PUBLIC_PATH_TOKEN) return [];
