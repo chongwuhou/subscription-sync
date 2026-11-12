@@ -47,6 +47,13 @@ const ADMIN_HTML = `<!doctype html>
     .preview-pane { border: 1px solid #8885; border-radius: 6px; padding: .6rem; min-width: 0; }
     .preview-pane h3 { margin: 0 0 .4rem; font-size: 1rem; }
     .preview-pane ul { margin: 0; padding-left: 1.2rem; max-height: 16rem; overflow: auto; }
+    .rename-rules { margin: .8rem 0; padding: .7rem; border: 1px solid #8885; border-radius: 6px; }
+    .rename-rules-title { font-weight: 600; margin-bottom: .5rem; }
+    .rename-rule-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; gap: .45rem; align-items: end; margin: .45rem 0; }
+    .rename-rule-row label { margin: 0; }
+    .rename-rule-row input[type="checkbox"] { width: auto; }
+    .rename-rule-row .remove-rule { margin: 0; }
+    @media (max-width: 720px) { .rename-rule-row { grid-template-columns: 1fr; } }
     @media (max-width: 720px) { .preview-grid { grid-template-columns: 1fr; } }
     .actions-bottom { position: sticky; bottom: 0; margin: 1rem 0 3rem; padding: .7rem; background: Canvas; border: 1px solid #8885; border-radius: 8px; }
   </style>
@@ -131,15 +138,82 @@ const ADMIN_HTML = `<!doctype html>
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(token)) throw new Error("订阅 " + (index + 1) + " 的输出地址路径只能使用字母、数字、下划线和短横线");
       return token;
     }
-    function parseRenameRulesInput(value, index) {
-      let parsed;
-      try { parsed = JSON.parse(value); } catch { throw new Error("订阅 " + (index + 1) + " 的改名规则必须是合法 JSON；多个规则请放在同一个数组中"); }
-      if (!Array.isArray(parsed)) throw new Error("订阅 " + (index + 1) + " 的改名规则必须是数组；多个规则请放在同一个数组中");
-      const rules = parsed.reduce((items, item) => items.concat(Array.isArray(item) ? item : [item]), []);
-      if (rules.some((rule) => !rule || typeof rule !== "object" || typeof rule.pattern !== "string")) {
-        throw new Error("订阅 " + (index + 1) + " 的每条改名规则都需要 pattern 和 replacement 字段");
-      }
-      return rules;
+    function flattenRenameRules(value) {
+      if (Array.isArray(value)) return value.flatMap(flattenRenameRules);
+      return value && typeof value === "object" ? [value] : [];
+    }
+    function renderRenameRulesEditor(parent, rules) {
+      const editor = document.createElement("section");
+      editor.className = "rename-rules";
+      editor.dataset.renameRulesEditor = "true";
+      const title = document.createElement("div");
+      title.className = "rename-rules-title";
+      title.textContent = "节点改名规则（按顺序执行）";
+      editor.appendChild(title);
+      const rows = document.createElement("div");
+      rows.className = "rename-rule-rows";
+      const addRow = (rule = {}) => {
+        const row = document.createElement("div");
+        row.className = "rename-rule-row";
+        const patternLabel = document.createElement("label");
+        patternLabel.textContent = "查找";
+        const pattern = document.createElement("input");
+        pattern.dataset.renameField = "pattern";
+        pattern.value = rule.pattern == null ? "" : String(rule.pattern);
+        pattern.placeholder = "例如：网址:nnbin.com";
+        patternLabel.appendChild(pattern);
+        row.appendChild(patternLabel);
+        const replacementLabel = document.createElement("label");
+        replacementLabel.textContent = "替换为";
+        const replacement = document.createElement("input");
+        replacement.dataset.renameField = "replacement";
+        replacement.value = rule.replacement == null ? "" : String(rule.replacement);
+        replacement.placeholder = "留空表示删除";
+        replacementLabel.appendChild(replacement);
+        row.appendChild(replacementLabel);
+        const regexLabel = document.createElement("label");
+        regexLabel.className = "check-label";
+        const regex = document.createElement("input");
+        regex.type = "checkbox";
+        regex.dataset.renameField = "regex";
+        regex.checked = rule.literal !== true;
+        regexLabel.appendChild(regex);
+        regexLabel.appendChild(document.createTextNode("正则模式"));
+        row.appendChild(regexLabel);
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "remove-rule";
+        remove.textContent = "删除";
+        remove.onclick = () => { row.remove(); };
+        row.appendChild(remove);
+        rows.appendChild(row);
+      };
+      const initialRules = flattenRenameRules(rules);
+      (initialRules.length > 0 ? initialRules : [{}]).forEach(addRow);
+      editor.appendChild(rows);
+      const add = document.createElement("button");
+      add.type = "button";
+      add.textContent = "添加一行规则";
+      add.onclick = () => addRow();
+      editor.appendChild(add);
+      const help = document.createElement("p");
+      help.className = "muted";
+      help.textContent = "默认按普通文字匹配，不需要转义；只有勾选“正则模式”时才按 JavaScript 正则匹配。替换为留空就是删除。";
+      editor.appendChild(help);
+      parent.appendChild(editor);
+      return editor;
+    }
+    function collectRenameRules(editor, index) {
+      const result = [];
+      editor.querySelectorAll(".rename-rule-row").forEach((row, rowIndex) => {
+        const pattern = row.querySelector("[data-rename-field='pattern']").value;
+        const replacement = row.querySelector("[data-rename-field='replacement']").value;
+        const regex = row.querySelector("[data-rename-field='regex']").checked;
+        if (!pattern && !replacement) return;
+        if (!pattern) throw new Error("订阅 " + (index + 1) + " 的第 " + (rowIndex + 1) + " 条规则还没有填写查找内容");
+        result.push(regex ? { pattern, replacement, flags: "g" } : { pattern, replacement, literal: true });
+      });
+      return result;
     }
     function renderPreviewPane(parent, title, nodes) {
       const pane = document.createElement("section");
@@ -297,17 +371,7 @@ const ADMIN_HTML = `<!doctype html>
         card.appendChild(filterHelp);
         addField(card, "defaultTarget", "无法识别客户端时的格式（clash/base64/sing-box/links）", profile.defaultTarget || "clash", "text", "clash");
         addCheckbox(card, "replaceAllFields", "允许替换节点全部字段（高级；默认只替换名称）", profile.replaceAllFields);
-        addField(card, "renameRules", "改名规则 JSON", JSON.stringify(profile.renameRules || [], null, 2), "textarea", '[{"pattern":"\\\\s*\\\\|\\\\s*","replacement":"-"}]');
-        const help = document.createElement("details");
-        help.className = "rules-help";
-        const helpText = [
-          '[{"pattern":"联通优选","replacement":"HK"},{"pattern":"Mbps","replacement":"1"}]',
-          '[{"pattern":"(?:网址|网站)[:：]?nnbin\\\\.com","replacement":""}]'
-        ].join("\\n");
-        help.innerHTML = '<summary>一行规则示例</summary>' +
-          '<p class="muted">多个规则放在同一个数组中，按顺序执行；粘贴多个数组也会自动合并。pattern 是 JavaScript 正则；默认只改名称，替换服务器/SNI 等字段请勾选高级选项。</p>' +
-          '<pre><code>' + helpText + '</code></pre>';
-        card.appendChild(help);
+        const renameRulesEditor = renderRenameRulesEditor(card, profile.renameRules || []);
         const previewButton = document.createElement("button");
         previewButton.type = "button";
         previewButton.textContent = "预览原版 / 规则修改后";
@@ -317,7 +381,7 @@ const ADMIN_HTML = `<!doctype html>
           previewButton.disabled = true;
           previewGrid.replaceChildren();
           try {
-            const renameRules = parseRenameRulesInput(card.querySelector("[data-field='renameRules']").value, index);
+            const renameRules = collectRenameRules(renameRulesEditor, index);
             const replaceAllFields = card.querySelector("[data-field='replaceAllFields']").checked;
             const nodeNameInclude = card.querySelector("[data-field='nodeNameInclude']").value;
             const nodeNameIncludeAll = card.querySelector("[data-field='nodeNameIncludeAll']").value;
@@ -358,7 +422,7 @@ const ADMIN_HTML = `<!doctype html>
         if (!/^https?:\\/\\//i.test(sourceUrl)) {
           throw new Error("订阅 " + (index + 1) + " 的源头订阅地址必须以 https:// 或 http:// 开头");
         }
-        const renameRules = parseRenameRulesInput(value("renameRules"), index);
+        const renameRules = collectRenameRules(card.querySelector("[data-rename-rules-editor]"), index);
         return {
           id,
           name: id,

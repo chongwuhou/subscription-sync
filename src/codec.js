@@ -428,13 +428,16 @@ export function decodeSubscription(input) {
 export function applyRename(name, renameRules = []) {
   let result = String(name ?? "").trim();
   const rules = Array.isArray(renameRules)
-    ? renameRules.reduce((items, rule) => items.concat(Array.isArray(rule) ? rule : [rule]), [])
+    ? renameRules.flatMap((rule) => Array.isArray(rule) ? rule.flat(Infinity) : [rule])
     : [];
   for (const rule of rules) {
     if (!rule || typeof rule.pattern !== "string") continue;
     try {
       const flags = typeof rule.flags === "string" ? rule.flags : "g";
-      result = result.replace(new RegExp(rule.pattern, flags), String(rule.replacement ?? ""));
+      const pattern = rule.literal === true
+        ? rule.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+        : rule.pattern;
+      result = result.replace(new RegExp(pattern, flags), String(rule.replacement ?? ""));
     } catch {
       // Invalid operator-supplied rules are ignored instead of breaking a refresh.
     }

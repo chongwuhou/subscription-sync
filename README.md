@@ -90,7 +90,7 @@ npm run check
 
 固定链接默认自动识别客户端，也可以显式指定：`?target=clash`、`?target=base64`、`?target=sing-box` 或 `?target=links`。`mihomo`、`stash` 等别名会映射到 Clash YAML；V2Ray、Shadowrocket、Surge、Loon、Quantumult X 等别名会映射到 Base64 分享链接。
 
-管理员后台地址为 `/admin`。输入 `ADMIN_TOKEN` 后可维护源头订阅地址、改名规则、多订阅 Token、最低有效节点数、默认输出格式、自动刷新间隔，以及统一的 Clash/Mihomo 分流配置；每个订阅还可以手动上传 YAML 作为历史源；令牌只在当前页面内存中使用，不写入浏览器存储。
+管理员后台地址为 `/admin`。输入 `ADMIN_TOKEN` 后可维护源头订阅地址、改名规则、多订阅 Token、最低有效节点数、默认输出格式、自动刷新间隔，以及统一的 Clash/Mihomo 分流配置；每个订阅还可以手动上传 YAML 作为历史源；令牌只在当前页面内存中使用，不写入浏览器存储。前台改名规则使用“查找 / 替换为”逐行编辑，默认按普通文字匹配，不需要填写 JSON 或转义；勾选“正则模式”后才按 JavaScript 正则匹配，多个规则按页面顺序执行，替换内容留空表示删除。
 
 Clash 分流配置示例（后台的折叠项中填写）：
 

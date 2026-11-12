@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildAggregateCandidate, buildCandidate, buildPreview, decidePublication } from "../src/core.js";
-import { decodeSubscription, parseShareLink } from "../src/codec.js";
+import { applyRename, decodeSubscription, parseShareLink } from "../src/codec.js";
 import { detectTarget, renderSubscription } from "../src/formats.js";
 
 const sampleClash = `
@@ -128,6 +128,13 @@ test("applies multiple rules even when pasted as nested arrays", () => {
     ]
   });
   assert.equal(preview.modified[0].name, "HK | 1");
+});
+
+test("supports simple literal rename rules from the admin editor", () => {
+  assert.equal(applyRename("VIP2 网址:nnbin.com", [
+    { pattern: "网址:nnbin.com", replacement: "", literal: true },
+    { pattern: "VIP2", replacement: "线路一", literal: true }
+  ]), "线路一");
 });
 
 test("replaces non-name fields only when the advanced option is enabled", async () => {
