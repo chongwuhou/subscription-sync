@@ -38,13 +38,12 @@ function sortNodes(nodes) {
   );
 }
 
-export function buildPreview(rawText, options = {}) {
+export function buildPreviewFromNodes(sourceNodes, options = {}) {
   const renameRules = Array.isArray(options.renameRules) ? options.renameRules : [];
   const replaceAllFields = options.replaceAllFields === true;
-  const parsed = decodeSubscription(rawText);
   const original = new Map();
   const modified = new Map();
-  for (const item of parsed) {
+  for (const item of Array.isArray(sourceNodes) ? sourceNodes : []) {
     const originalNode = normalizeNode(item, []);
     const modifiedNode = normalizeNode(item, renameRules, { replaceAllFields });
     if (!isValidNode(originalNode) || !isValidNode(modifiedNode)) continue;
@@ -53,6 +52,10 @@ export function buildPreview(rawText, options = {}) {
     modified.set(identity, modifiedNode);
   }
   return { original: sortNodes(original.values()), modified: sortNodes(modified.values()) };
+}
+
+export function buildPreview(rawText, options = {}) {
+  return buildPreviewFromNodes(decodeSubscription(rawText), options);
 }
 
 export async function buildAggregateCandidate(nodeGroups, options = {}) {
