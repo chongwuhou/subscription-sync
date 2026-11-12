@@ -1,4 +1,4 @@
-import { buildCandidate, decidePublication } from "./core.js";
+import { buildCandidate, buildPreview, decidePublication } from "./core.js";
 import {
   parseSubscriptionProfiles,
   parseSubscriptionProfilesJson,
@@ -34,6 +34,11 @@ const ADMIN_HTML = `<!doctype html>
     .rules-help summary { cursor: pointer; font-weight: 600; }
     .rules-help pre { overflow-x: auto; white-space: pre-wrap; font-size: .9rem; }
     .rules-help code { font-family: ui-monospace, monospace; }
+    .preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; margin: .8rem 0; }
+    .preview-pane { border: 1px solid #8885; border-radius: 6px; padding: .6rem; min-width: 0; }
+    .preview-pane h3 { margin: 0 0 .4rem; font-size: 1rem; }
+    .preview-pane ul { margin: 0; padding-left: 1.2rem; max-height: 16rem; overflow: auto; }
+    @media (max-width: 720px) { .preview-grid { grid-template-columns: 1fr; } }
     .actions-bottom { position: sticky; bottom: 0; margin: 1rem 0 3rem; padding: .7rem; background: Canvas; border: 1px solid #8885; border-radius: 8px; }
   </style>
 </head>
@@ -91,6 +96,21 @@ const ADMIN_HTML = `<!doctype html>
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(token)) throw new Error("订阅 " + (index + 1) + " 的输出地址路径只能使用字母、数字、下划线和短横线");
       return token;
     }
+    function renderPreviewPane(parent, title, nodes) {
+      const pane = document.createElement("section");
+      pane.className = "preview-pane";
+      const heading = document.createElement("h3");
+      heading.textContent = title + "（" + nodes.length + " 个节点）";
+      pane.appendChild(heading);
+      const list = document.createElement("ul");
+      nodes.forEach((node) => {
+        const item = document.createElement("li");
+        item.textContent = node.name + " · " + node.type + " · " + node.server + ":" + node.port;
+        list.appendChild(item);
+      });
+      pane.appendChild(list);
+      parent.appendChild(pane);
+    }
     function render() {
       root.replaceChildren();
       if (state.profiles.length === 0) {
@@ -144,6 +164,24 @@ const ADMIN_HTML = `<!doctype html>
           '<p class="muted">pattern 是 JavaScript 正则表达式；replacement 是替换后的文字；多个规则会按顺序执行。</p>' +
           '<pre><code>' + helpText + '</code></pre>';
         card.appendChild(help);
+        const previewButton = document.createElement("button");
+        previewButton.type = "button";
+        previewButton.textContent = "预览原版 / 规则修改后";
+        const previewGrid = document.createElement("div");
+        previewGrid.className = "preview-grid";
+        previewButton.onclick = async () => {
+          previewButton.disabled = true;
+          previewGrid.replaceChildren();
+          try {
+            const data = await api("/api/admin/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.id }) });
+            renderPreviewPane(previewGrid, "原版", data.original || []);
+            renderPreviewPane(previewGrid, "规则修改后", data.modified || []);
+            setStatus("已加载原版与规则修改后的节点预览；预览不显示 UUID、密码等凭据");
+          } catch (error) { setStatus(error.message); }
+          finally { previewButton.disabled = false; }
+        };
+        card.appendChild(previewButton);
+        card.appendChild(previewGrid);
         const saveOne = document.createElement("button");
         saveOne.type = "button";
         saveOne.textContent = "保存本订阅";
@@ -381,6 +419,22 @@ async function readJsonBody(request) {
   return JSON.parse(text);
 }
 
+function previewNode(node) {
+  return {
+    name: node.name,
+    type: node.type,
+    server: node.server,
+    port: node.port,
+    network: node.network,
+    tls: Boolean(node.tls)
+  };
+}
+
+function summarizeRefreshResult(result) {
+  const { nodes: _nodes, output: _output, ...summary } = result;
+  return summary;
+}
+
 async function handleAdminApi(request, env, url) {
   if (!isAdminAuthorized(request, env)) {
     return json({ error: env.ADMIN_TOKEN ? "unauthorized" : "admin-disabled" }, env.ADMIN_TOKEN ? 401 : 503);
@@ -429,8 +483,25 @@ async function handleAdminApi(request, env, url) {
       return json({ error: error instanceof Error ? error.message : "invalid-json" }, 400);
     }
   }
+  if (url.pathname === "/api/admin/preview" && request.method === "POST") {
+    try {
+      const body = await readJsonBody(request);
+      const id = String(body?.id ?? "").trim();
+      const profile = (await loadProfiles(env)).find((item) => item.id === id);
+      if (!profile) return json({ error: "subscription-not-found" }, 404);
+      const rawText = await fetchSource(env, profile);
+      const preview = buildPreview(rawText, { renameRules: profile.renameRules });
+      return json({
+        subscriptionId: profile.id,
+        original: preview.original.map(previewNode),
+        modified: preview.modified.map(previewNode)
+      });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : "preview-failed" }, 400);
+    }
+  }
   if (url.pathname === "/api/admin/refresh" && request.method === "POST") {
-    return json({ results: await refreshAll(env) });
+    return json({ results: (await refreshAll(env)).map(summarizeRefreshResult) });
   }
   if (url.pathname === "/api/admin/subscriptions/reset" && request.method === "POST") {
     if (!env.SUBSCRIPTION_STATE.delete) return json({ error: "state-store-does-not-support-delete" }, 503);
