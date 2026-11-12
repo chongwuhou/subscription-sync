@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildCandidate, decidePublication } from "../src/core.js";
 import { decodeSubscription, parseShareLink } from "../src/codec.js";
+import { detectTarget, renderSubscription } from "../src/formats.js";
 
 const sampleClash = `
 proxies:
@@ -79,5 +80,23 @@ test("decodes a Base64 share-link subscription", () => {
   const nodes = decodeSubscription(encoded);
   assert.equal(nodes.length, 1);
   assert.equal(nodes[0].server, "node.example.com");
+});
+
+test("renders multiple client formats and detects common client user agents", async () => {
+  const candidate = await buildCandidate(sampleClash);
+  const shadowrocketRequest = new Request("https://worker.example.com/sub/token", {
+    headers: { "user-agent": "Shadowrocket/2.2" }
+  });
+  assert.equal(detectTarget(shadowrocketRequest), "base64");
+  assert.equal(detectTarget(new Request("https://worker.example.com/sub/token?target=sing-box")), "sing-box");
+
+  const links = renderSubscription(candidate.nodes, "links");
+  assert.match(links.body, /^vmess:\/\//);
+  const base64 = renderSubscription(candidate.nodes, "base64");
+  assert.equal(base64.contentType, "text/plain; charset=utf-8");
+  const decoded = atob(base64.body.trim());
+  assert.match(decoded, /vmess:\/\//);
+  const singBox = renderSubscription(candidate.nodes, "sing-box");
+  assert.equal(JSON.parse(singBox.body).outbounds[0].tag, "PROXY");
 });
 
