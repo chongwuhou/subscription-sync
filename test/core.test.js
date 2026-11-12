@@ -42,6 +42,16 @@ test("builds an original and renamed preview without dropping valid nodes", () =
   assert.equal(preview.original[0].uuid, preview.modified[0].uuid);
 });
 
+test("applies multiple rules even when pasted as nested arrays", () => {
+  const preview = buildPreview(sampleClash, {
+    renameRules: [
+      [{ pattern: "US", replacement: "HK" }],
+      [{ pattern: "Alpha", replacement: "1" }]
+    ]
+  });
+  assert.equal(preview.modified[0].name, "HK | 1");
+});
+
 test("merges published nodes from multiple sources for one aggregate candidate", async () => {
   const first = (await buildCandidate(sampleClash)).nodes;
   const second = first.map((node) => ({ ...node, name: `Backup ${node.name}`, server: "backup.example.com" }));
