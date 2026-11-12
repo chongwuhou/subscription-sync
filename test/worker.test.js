@@ -161,9 +161,10 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(await page.text(), /输入管理员令牌/);
   const pageText = await (await worker.fetch(new Request("https://worker.example.com/admin"), env)).text();
   assert.match(pageText, /Cloudflare KV/);
-  assert.match(pageText, /改名\/替换规则案例/);
+  assert.match(pageText, /一行规则示例/);
   assert.match(pageText, /修改后的通用订阅地址/);
   assert.match(pageText, /复制地址/);
+  assert.match(pageText, /默认只替换名称/);
   assert.doesNotMatch(pageText, /固定链接路径 Token/);
 
   const unauthorized = await worker.fetch(new Request("https://worker.example.com/api/admin/subscriptions"), env);
@@ -209,14 +210,24 @@ test("admin API manages subscriptions and refresh interval without public access
     const previewResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/preview", {
       method: "POST",
       headers,
-      body: JSON.stringify({ id: "main", renameRules: [[{ pattern: "\\s+\\|\\s+", replacement: "-" }], [{ pattern: "One", replacement: "1" }]] })
+      body: JSON.stringify({ id: "main", renameRules: [[{ pattern: "\\s+\\|\\s+", replacement: "-" }], [{ pattern: "One", replacement: "1" }]], replaceAllFields: false })
     }), env);
     assert.equal(previewResponse.status, 200);
     const preview = await previewResponse.json();
     assert.equal(preview.original[0].name, "US | One");
     assert.equal(preview.modified[0].name, "US-1");
+    assert.equal(preview.modified[0].server, "one.example.com");
     assert.equal(Object.hasOwn(preview.original[0], "uuid"), false);
     assert.equal(Object.hasOwn(preview.modified[0], "uuid"), false);
+
+    const allFieldsPreviewResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/preview", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ id: "main", renameRules: [{ pattern: "one", replacement: "two", flags: "gi" }], replaceAllFields: true })
+    }), env);
+    assert.equal(allFieldsPreviewResponse.status, 200);
+    const allFieldsPreview = await allFieldsPreviewResponse.json();
+    assert.equal(allFieldsPreview.modified[0].server, "two.example.com");
 
     const refreshResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/refresh", {
       method: "POST",
