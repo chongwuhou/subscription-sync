@@ -735,7 +735,10 @@ async function ensureSourceSnapshotSchema(env) {
       .bind()
       .run()
       .then(() => true)
-      .catch(() => false);
+      .catch(() => {
+        sourceSnapshotSchemaPromise = null;
+        return false;
+      });
   }
   return sourceSnapshotSchemaPromise;
 }
