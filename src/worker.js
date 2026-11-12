@@ -6,6 +6,7 @@ import {
   validateSubscriptionProfiles
 } from "./config.js";
 import { detectTarget, renderSubscription, supportedTargets } from "./formats.js";
+import { normalizeClashConfig } from "./clash.js";
 
 const DEFAULT_MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const ADMIN_CONFIG_KEY = "subscription-config-v1";
@@ -56,13 +57,25 @@ const ADMIN_HTML = `<!doctype html>
   <label>自动刷新间隔（分钟，5-1440，按 5 分钟粒度）<input id="interval" type="number" min="5" max="1440" step="5" value="30" disabled></label>
   <p class="notice">保存后，订阅地址、改名规则和刷新间隔会写入 Cloudflare KV；以后重新打开或点击“重新读取”仍会保留。只有管理员令牌可以读取源地址。</p>
   <div id="status"></div>
+  <div id="clash-settings"></div>
   <div id="aggregate"></div>
   <div id="profiles"></div>
   <div class="actions-bottom"><button id="save-bottom" disabled>保存订阅配置</button><span class="muted"> 保存后会保留在 Cloudflare KV</span></div>
   <script>
-    const state = { token: "", profiles: [], aggregatePublicToken: "", refreshIntervalMinutes: 30 };
+    const state = {
+      token: "",
+      profiles: [],
+      aggregatePublicToken: "",
+      refreshIntervalMinutes: 30,
+      clashConfig: {
+        "proxy-groups": [{ name: "PROXY", type: "select", proxies: ["DIRECT", "{{NODES}}"] }],
+        "rule-providers": {},
+        rules: ["MATCH,PROXY"]
+      }
+    };
     const status = document.getElementById("status");
     const aggregateRoot = document.getElementById("aggregate");
+    const clashSettingsRoot = document.getElementById("clash-settings");
     const root = document.getElementById("profiles");
     const interval = document.getElementById("interval");
     const buttons = ["reload", "save", "save-bottom", "refresh", "add"].map((id) => document.getElementById(id));
@@ -171,7 +184,34 @@ const ADMIN_HTML = `<!doctype html>
       card.appendChild(note);
       aggregateRoot.appendChild(card);
     }
+    function parseClashConfigInput(value) {
+      let parsed;
+      try { parsed = JSON.parse(value); } catch { throw new Error("Clash 分流配置必须是合法 JSON"); }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Clash 分流配置必须是 JSON 对象");
+      return parsed;
+    }
+    function renderClashSettings() {
+      clashSettingsRoot.replaceChildren();
+      const details = document.createElement("details");
+      details.className = "rules-help";
+      const summary = document.createElement("summary");
+      summary.textContent = "Clash / Mihomo 分流配置（可选，汇总和各订阅共用）";
+      details.appendChild(summary);
+      const label = document.createElement("label");
+      label.textContent = "配置 JSON（proxy-groups、rule-providers、rules）";
+      const input = document.createElement("textarea");
+      input.dataset.field = "clashConfig";
+      input.value = JSON.stringify(state.clashConfig, null, 2);
+      label.appendChild(input);
+      details.appendChild(label);
+      const help = document.createElement("p");
+      help.className = "muted";
+      help.textContent = "代理组中的 {{NODES}} 会自动展开为当前所有有效节点；规则提供商地址请使用你信任的来源。留空字段会使用 PROXY + MATCH 的默认配置。";
+      details.appendChild(help);
+      clashSettingsRoot.appendChild(details);
+    }
     function render() {
+      renderClashSettings();
       renderAggregate();
       root.replaceChildren();
       if (state.profiles.length === 0) {
@@ -287,6 +327,7 @@ const ADMIN_HTML = `<!doctype html>
         state.profiles = data.subscriptions || [];
         state.aggregatePublicToken = data.aggregatePublicToken || "";
         state.refreshIntervalMinutes = data.refreshIntervalMinutes || 30;
+        state.clashConfig = data.clashConfig || state.clashConfig;
         interval.value = state.refreshIntervalMinutes;
         interval.disabled = false;
         setEnabled(true);
@@ -308,11 +349,12 @@ const ADMIN_HTML = `<!doctype html>
     async function saveAll(focusIndex = null) {
       try {
         const subscriptions = collect();
+        const clashConfig = parseClashConfigInput(clashSettingsRoot.querySelector("[data-field='clashConfig']").value);
         const aggregateLink = aggregateRoot.querySelector("[data-field='aggregateLink']");
         const aggregatePublicToken = aggregateLink ? publicTokenFromLink(aggregateLink.value, 0) : "";
         if (subscriptions.length === 0) throw new Error("当前没有订阅配置，请先点击“新增订阅”并填写完整后再保存");
         await api("/api/admin/subscriptions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscriptions, aggregatePublicToken }) });
-        await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value) }) });
+        await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value), clashConfig }) });
         const scope = focusIndex ? "第 " + focusIndex + " 个订阅" : subscriptions.length + " 个订阅";
         await load();
         setStatus("已保存" + scope + "及刷新间隔到 Cloudflare KV。刷新页面后仍会保留；下一次 Cron 刷新或点击“立即刷新”后生效。");
@@ -469,13 +511,19 @@ async function loadSettings(env) {
     if (stored !== null) {
       try {
         const parsed = JSON.parse(stored);
-        return { refreshIntervalMinutes: normalizeRefreshInterval(parsed.refreshIntervalMinutes) };
+        return {
+          refreshIntervalMinutes: normalizeRefreshInterval(parsed.refreshIntervalMinutes),
+          clashConfig: normalizeClashConfig(parsed.clashConfig)
+        };
       } catch {
         // Fall through to the private environment variable if the setting is corrupt.
       }
     }
   }
-  return { refreshIntervalMinutes: normalizeRefreshInterval(env.REFRESH_INTERVAL_MINUTES) };
+  return {
+    refreshIntervalMinutes: normalizeRefreshInterval(env.REFRESH_INTERVAL_MINUTES),
+    clashConfig: normalizeClashConfig(env.CLASH_CONFIG_JSON)
+  };
 }
 
 async function scheduledRefreshDue(env, now) {
@@ -543,7 +591,13 @@ async function handleAdminApi(request, env, url) {
     const current = await storedProfiles(env);
     const settings = await loadSettings(env);
     const aggregatePublicToken = await ensureAggregateToken(env);
-    return json({ managed: current.managed, subscriptions: current.profiles, aggregatePublicToken, refreshIntervalMinutes: settings.refreshIntervalMinutes });
+    return json({
+      managed: current.managed,
+      subscriptions: current.profiles,
+      aggregatePublicToken,
+      refreshIntervalMinutes: settings.refreshIntervalMinutes,
+      clashConfig: settings.clashConfig
+    });
   }
   if (url.pathname === "/api/admin/subscriptions" && request.method === "PUT") {
     try {
@@ -576,7 +630,11 @@ async function handleAdminApi(request, env, url) {
       if (!Number.isInteger(value) || value < 5 || value > 1440 || value % 5 !== 0) {
         return json({ error: "refreshIntervalMinutes must be an integer from 5 to 1440 in 5-minute increments" }, 400);
       }
-      await env.SUBSCRIPTION_STATE.put(ADMIN_SETTINGS_KEY, JSON.stringify({ refreshIntervalMinutes: value }));
+      const current = await loadSettings(env);
+      const clashConfig = Object.prototype.hasOwnProperty.call(body ?? {}, "clashConfig")
+        ? normalizeClashConfig(body.clashConfig, true)
+        : current.clashConfig;
+      await env.SUBSCRIPTION_STATE.put(ADMIN_SETTINGS_KEY, JSON.stringify({ refreshIntervalMinutes: value, clashConfig }));
       return json({ ok: true, refreshIntervalMinutes: value });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "invalid-json" }, 400);
@@ -640,7 +698,7 @@ async function writeAudit(env, profileId, result, now) {
   }
 }
 
-async function refreshProfile(env, profile, now) {
+async function refreshProfile(env, profile, now, settings = null) {
   const finish = async (result) => {
     await writeAudit(env, profile.id, result, now);
     return result;
@@ -658,10 +716,12 @@ async function refreshProfile(env, profile, now) {
 
   let candidate;
   try {
+    const currentSettings = settings ?? await loadSettings(env);
     candidate = await buildCandidate(rawText, {
       renameRules: profile.renameRules,
       replaceAllFields: profile.replaceAllFields,
-      minValidNodes: profile.minValidNodes
+      minValidNodes: profile.minValidNodes,
+      clashConfig: currentSettings.clashConfig
     });
   } catch (error) {
     return finish({ action: "keep", reason: "parse-error", error: error instanceof Error ? error.message : "unknown" });
@@ -684,12 +744,13 @@ async function refreshProfile(env, profile, now) {
 export async function refreshAll(env, now = new Date()) {
   const profiles = await loadProfiles(env);
   if (profiles.length === 0) return [{ action: "keep", reason: "no-subscriptions-configured" }];
+  const settings = await loadSettings(env);
   const results = [];
   // Process sequentially to avoid a burst against upstream subscription providers.
   for (const profile of profiles) {
     results.push({
       subscriptionId: profile.id,
-      ...(await refreshProfile(env, profile, now))
+      ...(await refreshProfile(env, profile, now, settings))
     });
   }
   return results;
@@ -701,6 +762,7 @@ export async function refreshAggregate(env, now = new Date(), profiles = null) {
   if (!env.SUBSCRIPTION_STATE?.get || !env.SUBSCRIPTION_STATE?.put) {
     return { subscriptionId: "all", action: "keep", reason: "state-store-not-configured" };
   }
+  const settings = await loadSettings(env);
   const nodeGroups = [];
   for (const profile of sourceProfiles) {
     const state = await loadState(env, profile.id);
@@ -708,7 +770,7 @@ export async function refreshAggregate(env, now = new Date(), profiles = null) {
   }
   let candidate;
   try {
-    candidate = await buildAggregateCandidate(nodeGroups);
+    candidate = await buildAggregateCandidate(nodeGroups, { clashConfig: settings.clashConfig });
   } catch (error) {
     return { subscriptionId: "all", action: "keep", reason: "aggregate-error", error: error instanceof Error ? error.message : "unknown" };
   }
@@ -748,10 +810,11 @@ async function servePublishedState(env, stateId, defaultTarget, request) {
 
   let rendered;
   try {
+    const settings = await loadSettings(env);
     // Older KV records contain only Clash YAML. Keep that format available
     // while requiring one successful refresh before serving other targets.
     rendered = state.nodes?.length
-      ? renderSubscription(state.nodes, target)
+      ? renderSubscription(state.nodes, target, settings.clashConfig)
       : target === "clash"
         ? { body: state.output, contentType: "text/yaml; charset=utf-8" }
         : null;
