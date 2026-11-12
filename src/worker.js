@@ -55,7 +55,7 @@ const ADMIN_HTML = `<!doctype html>
   <p class="muted">管理源头订阅地址、节点改名规则、最低有效节点数和客户端输出格式。配置只保存到受保护的 Cloudflare KV，不保存在浏览器。</p>
   <p><button id="login">输入管理员令牌</button> <button id="reload" disabled>重新读取</button> <button id="save" disabled>保存订阅配置</button> <button id="refresh" disabled>立即刷新</button> <button id="add" disabled>新增订阅</button></p>
   <label>自动刷新间隔（分钟，5-1440，按 5 分钟粒度）<input id="interval" type="number" min="5" max="1440" step="5" value="30" disabled></label>
-  <p class="notice">保存后，订阅地址、改名规则和刷新间隔会写入 Cloudflare KV；以后重新打开或点击“重新读取”仍会保留。只有管理员令牌可以读取源地址。</p>
+  <p class="notice">保存后，订阅地址、改名规则、Clash 分流配置和刷新间隔会写入 Cloudflare KV；Clash 分流配置在下一次请求时生效，源订阅节点在下一次定时刷新或点击“立即刷新”后更新。只有管理员令牌可以读取源地址。</p>
   <div id="status"></div>
   <div id="clash-settings"></div>
   <div id="aggregate"></div>
@@ -357,7 +357,7 @@ const ADMIN_HTML = `<!doctype html>
         await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value), clashConfig }) });
         const scope = focusIndex ? "第 " + focusIndex + " 个订阅" : subscriptions.length + " 个订阅";
         await load();
-        setStatus("已保存" + scope + "及刷新间隔到 Cloudflare KV。刷新页面后仍会保留；下一次 Cron 刷新或点击“立即刷新”后生效。");
+        setStatus("已保存" + scope + "、Clash 分流配置及刷新间隔到 Cloudflare KV。Clash 分流配置立即用于已发布节点；源订阅节点将在下一次 Cron 刷新或点击“立即刷新”后更新。");
       } catch (error) { setStatus(error.message); }
     }
     document.getElementById("save").onclick = () => saveAll();
