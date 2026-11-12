@@ -1,0 +1,17 @@
+name = "subscription-sync"
+main = "src/worker.js"
+compatibility_date = "2026-01-01"
+
+# This file is an example only. It does not enable any Cloudflare service.
+# Replace the placeholder KV namespace id only after the deployment policy is
+# explicitly approved by the operator.
+
+[[kv_namespaces]]
+binding = "SUBSCRIPTION_STATE"
+id = "replace-with-an-approved-kv-namespace-id"
+
+[vars]
+# Keep the actual source URL and public token out of this file.
+# SOURCE_URL, PUBLIC_PATH_TOKEN and RENAME_RULES_JSON should be configured as
+# secrets or private environment variables by the operator.
+
