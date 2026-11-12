@@ -67,6 +67,18 @@ Worker 为每个 `id` 使用独立的 KV key：`published-state-v1:<id>`，公�
 - `REFRESH_INTERVAL_MINUTES`：后台尚未保存设置时的刷新间隔，5-1440 分钟，按 5 分钟递增，默认 `30`。
 
 部署后访问 `/admin`，输入 `ADMIN_TOKEN` 即可管理多个源和刷新间隔。后台保存的订阅配置写入受保护的 KV；管理员 API 不接受公开源地址参数，且不把源地址写入日志。
+
+后台“改名规则 JSON”示例：
+
+```json
+[
+  {"pattern":"\\s*\\|\\s*","replacement":"-"}
+]
+```
+
+这会把 `US | New York` 改成 `US-New York`。多个替换规则会按数组顺序执行，例如把地区统一成短名：
+`[{"pattern":"香港","replacement":"HK"},{"pattern":"新加坡","replacement":"SG"}]`。
+配置保存到 KV 后，重新打开后台仍会保留；6 小时和 24 小时分别填写 `360` 和 `1440` 分钟。
 - `SOURCE_TIMEOUT_MS`：默认 `15000`。
 - `MAX_SOURCE_BYTES`：默认 `5242880`。
 - `ALLOW_HTTP_SOURCE=true`：只有上游确实没有 HTTPS 时才启用。
