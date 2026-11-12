@@ -1165,7 +1165,10 @@ async function servePublishedState(env, stateId, defaultTarget, request) {
     rendered = null;
   }
   if (!rendered) return new Response("This target is unavailable until the next valid refresh", { status: 503 });
-  return new Response(rendered.body, {
+  const responseBody = rendered.contentType.startsWith("text/yaml") && !String(rendered.body).startsWith("\uFEFF")
+    ? `\uFEFF${rendered.body}`
+    : rendered.body;
+  return new Response(responseBody, {
     status: 200,
     headers: {
       "content-type": rendered.contentType,

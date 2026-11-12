@@ -181,7 +181,11 @@ test("multiple subscriptions have isolated state", async () => {
     const backupResponse = await worker.fetch(new Request("https://worker.example.com/sub/backup-token"), env);
     assert.equal(mainResponse.status, 200);
     assert.equal(backupResponse.status, 200);
-    assert.match(await mainResponse.text(), /one.example.com/);
+    const mainBytes = new Uint8Array(await mainResponse.arrayBuffer());
+    assert.deepEqual(Array.from(mainBytes.slice(0, 3)), [0xef, 0xbb, 0xbf]);
+    const mainText = new TextDecoder().decode(mainBytes);
+    assert.match(mainText, /one.example.com/);
+    assert.equal(mainResponse.headers.get("content-type"), "text/yaml; charset=utf-8");
     assert.match(await backupResponse.text(), /backup.example.com/);
 
     const base64Response = await worker.fetch(new Request("https://worker.example.com/sub/main-token", {
