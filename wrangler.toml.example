@@ -1,6 +1,8 @@
 name = "subscription-sync"
 main = "src/worker.js"
 compatibility_date = "2026-01-01"
+workers_dev = true
+preview_urls = false
 
 # This file is an example only. It does not enable any Cloudflare service.
 # Replace the placeholder KV namespace id with the ID of the approved
