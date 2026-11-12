@@ -209,12 +209,12 @@ test("admin API manages subscriptions and refresh interval without public access
     const previewResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/preview", {
       method: "POST",
       headers,
-      body: JSON.stringify({ id: "main", renameRules: [{ pattern: "\\s+\\|\\s+", replacement: "-" }] })
+      body: JSON.stringify({ id: "main", renameRules: [[{ pattern: "\\s+\\|\\s+", replacement: "-" }], [{ pattern: "One", replacement: "1" }]] })
     }), env);
     assert.equal(previewResponse.status, 200);
     const preview = await previewResponse.json();
     assert.equal(preview.original[0].name, "US | One");
-    assert.equal(preview.modified[0].name, "US-One");
+    assert.equal(preview.modified[0].name, "US-1");
     assert.equal(Object.hasOwn(preview.original[0], "uuid"), false);
     assert.equal(Object.hasOwn(preview.modified[0], "uuid"), false);
 
