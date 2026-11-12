@@ -16,6 +16,22 @@ class MemoryKV {
   }
 }
 
+class MemoryD1 {
+  constructor() {
+    this.rows = [];
+  }
+
+  prepare() {
+    return {
+      bind: (...values) => ({
+        run: async () => {
+          this.rows.push(values);
+        }
+      })
+    };
+  }
+}
+
 const validSource = `
 proxies:
   - name: US | One
@@ -36,9 +52,11 @@ proxies:
 test("Worker refresh publishes only changed valid content", async () => {
   const originalFetch = globalThis.fetch;
   const state = new MemoryKV();
+  const audit = new MemoryD1();
   const env = {
     SOURCE_URL: "https://source.example.com/subscription",
     SUBSCRIPTION_STATE: state,
+    SUBSCRIPTION_AUDIT: audit,
     RENAME_RULES_JSON: JSON.stringify([{ pattern: "\\s*\\|\\s*", replacement: "-" }])
   };
   let source = validSource;
@@ -59,6 +77,9 @@ test("Worker refresh publishes only changed valid content", async () => {
     const published = JSON.parse(await state.get("published-state-v1"));
     assert.equal(published.validCount, 1);
     assert.match(published.output, /US-One/);
+    assert.equal(audit.rows.length, 3);
+    assert.equal(audit.rows[0][0], "2026-11-12T00:00:00.000Z");
+    assert.equal(audit.rows[2][1], "keep");
   } finally {
     globalThis.fetch = originalFetch;
   }
