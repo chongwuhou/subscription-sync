@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCandidate, buildPreview, decidePublication } from "../src/core.js";
+import { buildAggregateCandidate, buildCandidate, buildPreview, decidePublication } from "../src/core.js";
 import { decodeSubscription, parseShareLink } from "../src/codec.js";
 import { detectTarget, renderSubscription } from "../src/formats.js";
 
@@ -40,6 +40,16 @@ test("builds an original and renamed preview without dropping valid nodes", () =
   assert.equal(preview.original[0].name, "US | Alpha");
   assert.equal(preview.modified[0].name, "US-Alpha");
   assert.equal(preview.original[0].uuid, preview.modified[0].uuid);
+});
+
+test("merges published nodes from multiple sources for one aggregate candidate", async () => {
+  const first = (await buildCandidate(sampleClash)).nodes;
+  const second = first.map((node) => ({ ...node, name: `Backup ${node.name}`, server: "backup.example.com" }));
+  const candidate = await buildAggregateCandidate([first, second]);
+  assert.equal(candidate.valid, true);
+  assert.equal(candidate.validCount, 2);
+  assert.match(candidate.output, /alpha\.example\.com/);
+  assert.match(candidate.output, /backup\.example\.com/);
 });
 
 test("unchanged content is not republished", async () => {
