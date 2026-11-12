@@ -232,6 +232,34 @@ const ADMIN_HTML = `<!doctype html>
         const card = document.createElement("fieldset");
         addField(card, "id", "订阅名称 / ID（唯一）", profile.id, "text", "例如：主订阅 或 backup");
         addField(card, "sourceUrl", "完整源头订阅地址（把 ?token=... 一起粘贴，仅管理员可见）", profile.sourceUrl, "url", "https://供应商.example/subscribe?token=...");
+        const uploadLabel = document.createElement("label");
+        uploadLabel.textContent = "手动上传 YAML（源站不可用时作为历史源）";
+        const uploadInput = document.createElement("input");
+        uploadInput.type = "file";
+        uploadInput.accept = ".yaml,.yml,.txt,text/yaml,application/yaml,text/plain";
+        uploadLabel.appendChild(uploadInput);
+        card.appendChild(uploadLabel);
+        const uploadButton = document.createElement("button");
+        uploadButton.type = "button";
+        uploadButton.textContent = "上传并保存历史源";
+        uploadButton.onclick = async () => {
+          const file = uploadInput.files?.[0];
+          if (!file) { setStatus("请先选择 YAML 文件"); return; }
+          if (file.size > 5 * 1024 * 1024) { setStatus("YAML 文件不能超过 5 MB"); return; }
+          uploadButton.disabled = true;
+          try {
+            const content = await file.text();
+            const data = await api("/api/admin/import", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ id: profile.id, content })
+            });
+            setStatus("已上传并保存订阅 " + profile.id + " 的历史有效源，共 " + data.validCount + " 个节点；源站不可用时会自动使用。");
+            await load();
+          } catch (error) { setStatus(error.message); }
+          finally { uploadButton.disabled = false; }
+        };
+        card.appendChild(uploadButton);
         const publicLinkInput = addField(card, "publicLink", "修改后的通用订阅地址（可修改 /sub/ 后面的路径）", publicLinkFor(profile.publicToken), "url", location.origin + "/sub/保存后自动生成");
         const copyLink = document.createElement("button");
         copyLink.type = "button";
@@ -559,9 +587,9 @@ function isAdminAuthorized(request, env) {
   return Boolean(token) && request.headers.get("authorization") === `Bearer ${token}`;
 }
 
-async function readJsonBody(request) {
+async function readJsonBody(request, maxBytes = 256 * 1024) {
   const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > 256 * 1024) throw new Error("Request body is too large");
+  if (new TextEncoder().encode(text).byteLength > maxBytes) throw new Error("Request body is too large");
   return JSON.parse(text);
 }
 
@@ -623,6 +651,46 @@ async function handleAdminApi(request, env, url) {
       return json({ ok: true, count: checked.profiles.length });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "invalid-json" }, 400);
+    }
+  }
+  if (url.pathname === "/api/admin/import" && request.method === "POST") {
+    try {
+      const body = await readJsonBody(request, DEFAULT_MAX_SOURCE_BYTES + 64 * 1024);
+      const id = String(body?.id ?? "").trim();
+      const content = String(body?.content ?? "");
+      const profile = (await loadProfiles(env)).find((item) => item.id === id);
+      if (!profile) return json({ error: "subscription-not-found" }, 404);
+      if (!content.trim()) return json({ error: "uploaded-source-is-empty" }, 400);
+      if (new TextEncoder().encode(content).byteLength > DEFAULT_MAX_SOURCE_BYTES) {
+        return json({ error: "uploaded-source-is-too-large" }, 413);
+      }
+      const settings = await loadSettings(env);
+      const candidate = await buildCandidate(content, {
+        renameRules: profile.renameRules,
+        replaceAllFields: profile.replaceAllFields,
+        minValidNodes: profile.minValidNodes,
+        clashConfig: settings.clashConfig
+      });
+      if (!candidate.valid) {
+        return json({ error: "uploaded-source-has-no-valid-nodes", validCount: candidate.validCount }, 400);
+      }
+      const capturedAt = new Date();
+      if (!await writeSourceSnapshot(env, profile.id, candidate, capturedAt)) {
+        return json({ error: "source-snapshot-store-not-configured" }, 503);
+      }
+      const previous = await loadState(env, profile.id);
+      const decision = await publishDecision(env, profile.id, decidePublication(candidate, previous), capturedAt);
+      const profiles = await loadProfiles(env);
+      const aggregate = await refreshAggregate(env, capturedAt, profiles, settings);
+      return json({
+        ok: true,
+        subscriptionId: profile.id,
+        action: decision.action,
+        validCount: candidate.validCount,
+        aggregateAction: aggregate.action
+      });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : "upload-failed" }, 400);
     }
   }
   if (url.pathname === "/api/admin/settings" && request.method === "PUT") {
@@ -698,16 +766,18 @@ async function publishDecision(env, profileId, decision, now) {
 }
 
 async function writeSourceSnapshot(env, profileId, candidate, now) {
-  if (!env.SUBSCRIPTION_AUDIT?.prepare || !candidate?.valid || !candidate.sourceContentHash) return;
+  if (!env.SUBSCRIPTION_AUDIT?.prepare || !candidate?.valid || !candidate.sourceContentHash) return false;
   try {
-    if (!await ensureSourceSnapshotSchema(env)) return;
+    if (!await ensureSourceSnapshotSchema(env)) return false;
     const nodes = Array.isArray(candidate.sourceNodes) ? candidate.sourceNodes : [];
     await env.SUBSCRIPTION_AUDIT
       .prepare("INSERT OR IGNORE INTO source_snapshots (subscription_id, captured_at, source_content_hash, valid_count, nodes_json) VALUES (?, ?, ?, ?, ?)")
       .bind(profileId, now.toISOString(), candidate.sourceContentHash, candidate.validCount, JSON.stringify(nodes))
       .run();
+    return true;
   } catch {
     console.log(JSON.stringify({ event: "source-snapshot-write-failed" }));
+    return false;
   }
 }
 
