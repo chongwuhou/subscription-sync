@@ -149,6 +149,9 @@ test("admin API manages subscriptions and refresh interval without public access
   const page = await worker.fetch(new Request("https://worker.example.com/admin"), env);
   assert.equal(page.status, 200);
   assert.match(await page.text(), /输入管理员令牌/);
+  const pageText = await (await worker.fetch(new Request("https://worker.example.com/admin"), env)).text();
+  assert.match(pageText, /Cloudflare KV/);
+  assert.match(pageText, /改名\/替换规则案例/);
 
   const unauthorized = await worker.fetch(new Request("https://worker.example.com/api/admin/subscriptions"), env);
   assert.equal(unauthorized.status, 401);
