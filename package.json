@@ -1,0 +1,15 @@
+{
+  "name": "subscription-sync",
+  "version": "0.1.0",
+  "description": "Transparent subscription fetch, rename, validation, change detection, and Clash YAML publishing.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/codec.js && node --check src/core.js && node --check src/worker.js"
+  },
+  "engines": {
+    "node": ">=18.18"
+  },
+  "license": "MIT"
+}
+
