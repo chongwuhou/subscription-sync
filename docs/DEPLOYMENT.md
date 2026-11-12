@@ -40,6 +40,17 @@ D1 是可选项。启用 `SUBSCRIPTION_AUDIT` 后，运行 `migrations/0001_audi
 
 Worker 为每个 `id` 使用独立的 KV key：`published-state-v1:<id>`，公开链接格式为 `/sub/<publicToken>`。一个源失败、无有效节点或没有变化时，不会覆盖其他源。
 
+## 客户端格式适配
+
+同一个固定链接会根据请求头自动选择格式：
+
+- Clash、Clash Meta、Mihomo、Stash：Clash/Mihomo YAML。
+- V2RayN、V2RayNG、Shadowrocket、Surge、Loon、Quantumult X 等：Base64 分享链接。
+- sing-box：sing-box JSON。
+- 无法判断时：Clash/Mihomo YAML。
+
+也可以用查询参数强制格式：`?target=clash`、`?target=base64`、`?target=sing-box`、`?target=links`。查询参数只选择输出格式，不允许传入或覆盖订阅源地址。
+
 ## 私有配置
 
 不要把下列值写进公开仓库：
@@ -51,6 +62,7 @@ Worker 为每个 `id` 使用独立的 KV key：`published-state-v1:<id>`，公�
 可选配置：
 
 - `MIN_VALID_NODES`：默认 `1`。
+- `DEFAULT_TARGET`：无法识别客户端时的默认格式，默认 `clash`。
 - `SOURCE_TIMEOUT_MS`：默认 `15000`。
 - `MAX_SOURCE_BYTES`：默认 `5242880`。
 - `ALLOW_HTTP_SOURCE=true`：只有上游确实没有 HTTPS 时才启用。
