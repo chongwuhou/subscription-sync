@@ -165,7 +165,6 @@ test("admin API manages subscriptions and refresh interval without public access
         id: "main",
         name: "主订阅",
         sourceUrl: "https://source.example.com/sub?token=REDACTED",
-        publicToken: "main-token",
         renameRules: [{ pattern: "\\s+\\|\\s+", replacement: "-" }],
         minValidNodes: 2,
         defaultTarget: "base64"
@@ -185,6 +184,7 @@ test("admin API manages subscriptions and refresh interval without public access
   const body = await read.json();
   assert.equal(body.managed, true);
   assert.equal(body.subscriptions[0].sourceUrl, "https://source.example.com/sub?token=REDACTED");
+  assert.match(body.subscriptions[0].publicToken, /^[A-Za-z0-9_-]{24,64}$/);
   assert.equal(body.subscriptions[0].minValidNodes, 2);
   assert.equal(body.refreshIntervalMinutes, 15);
 });
