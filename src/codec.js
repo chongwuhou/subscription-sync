@@ -189,7 +189,10 @@ export function parseClashYaml(text) {
       if (first) {
         const pair = splitKeyValue(first);
         if (pair) current[pair[0]] = parseScalar(pair[1]);
-        else if (first.startsWith("{") && first.endsWith("}")) current = parseFlowMap(first);
+        else if (first.startsWith("{") && first.endsWith("}")) {
+          current = parseFlowMap(first);
+          stack = [{ indent: itemIndent - 1, object: current }];
+        }
       }
       continue;
     }
@@ -296,11 +299,33 @@ function parseShadowsocks(link) {
   };
 }
 
+function parseShadowsocksR(link) {
+  const body = link.slice("ssr://".length).split("?")[0];
+  const decoded = decodeBase64(body);
+  if (!decoded) throw new Error("Invalid SSR Base64 payload");
+  const [endpoint, queryText = ""] = decoded.split("/?");
+  const parts = endpoint.split(":");
+  if (parts.length < 6) throw new Error("Invalid SSR payload");
+  const query = new URLSearchParams(queryText);
+  const password = decodeBase64(parts.slice(5).join(":")) || parts.slice(5).join(":");
+  return {
+    name: decodeBase64(query.get("remarks") || "") || `ssr-${parts[0]}`,
+    type: "ssr",
+    server: parts[0],
+    port: Number(parts[1]),
+    protocol: parts[2],
+    cipher: parts[3],
+    obfs: parts[4],
+    password
+  };
+}
+
 export function parseShareLink(link) {
   const trimmed = link.trim();
   const scheme = trimmed.split(":", 1)[0].toLowerCase();
   if (scheme === "vmess") return parseVmess(trimmed);
   if (scheme === "ss") return parseShadowsocks(trimmed);
+  if (scheme === "ssr") return parseShadowsocksR(trimmed);
   if (scheme === "hy2") return parseCommonUrl(trimmed.replace(/^hy2:/i, "hysteria2:"), "hysteria2");
   if (scheme === "vless" || scheme === "trojan" || scheme === "hysteria" || scheme === "hysteria2" || scheme === "tuic") {
     return parseCommonUrl(trimmed, scheme);
@@ -326,9 +351,13 @@ function fromJsonPayload(payload) {
     return payload.outbounds
       .filter((item) => item && !["direct", "block", "dns", "selector", "urltest", "reject"].includes(item.type))
       .map((item) => {
+        const type = {
+          shadowsocks: "ss",
+          socks: "socks5"
+        }[item.type] || item.type;
         const node = {
-          name: item.tag,
-          type: item.type,
+          name: item.tag || `${type}-${item.server || "node"}`,
+          type,
           server: item.server,
           port: item.server_port,
           uuid: item.uuid,
@@ -357,7 +386,18 @@ export function decodeSubscription(input) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => SHARE_SCHEMES.some((scheme) => line.toLowerCase().startsWith(`${scheme}://`)));
-  if (links.length > 0) return links.map((link) => parseShareLink(link));
+  if (links.length > 0) {
+    const parsed = [];
+    for (const link of links) {
+      try {
+        parsed.push(parseShareLink(link));
+      } catch {
+        // Unsupported or malformed links are ignored; the update gate will
+        // reject the whole candidate when no valid nodes remain.
+      }
+    }
+    return parsed;
+  }
 
   if (looksLikeBase64(text)) {
     const decoded = decodeBase64(text);
