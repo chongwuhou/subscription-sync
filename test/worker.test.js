@@ -203,7 +203,8 @@ test("multiple subscriptions have isolated state", async () => {
 
 test("admin API manages subscriptions and refresh interval without public access", async () => {
   const state = new MemoryKV();
-  const env = { SUBSCRIPTION_STATE: state, ADMIN_TOKEN: "admin-secret" };
+  const audit = new MemoryD1();
+  const env = { SUBSCRIPTION_STATE: state, SUBSCRIPTION_AUDIT: audit, ADMIN_TOKEN: "admin-secret" };
   const page = await worker.fetch(new Request("https://worker.example.com/admin"), env);
   assert.equal(page.status, 200);
   assert.match(await page.text(), /输入管理员令牌/);
@@ -215,6 +216,7 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(pageText, /默认只替换名称/);
   assert.match(pageText, /Clash \/ Mihomo 分流配置/);
   assert.match(pageText, /Rule Providers|rule-providers/);
+  assert.match(pageText, /上传并保存历史源/);
   assert.doesNotMatch(pageText, /固定链接路径 Token/);
 
   const unauthorized = await worker.fetch(new Request("https://worker.example.com/api/admin/subscriptions"), env);
@@ -262,6 +264,18 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.equal(body.refreshIntervalMinutes, 15);
   assert.equal(body.clashConfig.rules[0], "RULE-SET,ads,REJECT");
   assert.equal(body.clashConfig["rule-providers"].ads.type, "http");
+
+  const importResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/import", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ id: "工作一", content: validSource })
+  }), env);
+  assert.equal(importResponse.status, 200);
+  const importBody = await importResponse.json();
+  assert.equal(importBody.validCount, 1);
+  assert.equal(audit.snapshots.length, 1);
+  const importedState = JSON.parse(await state.get("published-state-v1:工作一"));
+  assert.match(importedState.output, /rule-providers/);
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(validSource, { status: 200 });
