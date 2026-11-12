@@ -100,6 +100,16 @@ const ADMIN_HTML = `<!doctype html>
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(token)) throw new Error("订阅 " + (index + 1) + " 的输出地址路径只能使用字母、数字、下划线和短横线");
       return token;
     }
+    function parseRenameRulesInput(value, index) {
+      let parsed;
+      try { parsed = JSON.parse(value); } catch { throw new Error("订阅 " + (index + 1) + " 的改名规则必须是合法 JSON；多个规则请放在同一个数组中"); }
+      if (!Array.isArray(parsed)) throw new Error("订阅 " + (index + 1) + " 的改名规则必须是数组；多个规则请放在同一个数组中");
+      const rules = parsed.reduce((items, item) => items.concat(Array.isArray(item) ? item : [item]), []);
+      if (rules.some((rule) => !rule || typeof rule !== "object" || typeof rule.pattern !== "string")) {
+        throw new Error("订阅 " + (index + 1) + " 的每条改名规则都需要 pattern 和 replacement 字段");
+      }
+      return rules;
+    }
     function renderPreviewPane(parent, title, nodes) {
       const pane = document.createElement("section");
       pane.className = "preview-pane";
@@ -192,10 +202,13 @@ const ADMIN_HTML = `<!doctype html>
           '[{"pattern":"香港","replacement":"HK"},{"pattern":"新加坡","replacement":"SG"}]',
           "",
           "3. 删除名称开头的机场标签",
-          '[{"pattern":"^\\\\s*机场[-_ ]*","replacement":""}]'
+          '[{"pattern":"^\\\\s*机场[-_ ]*","replacement":""}]',
+          "",
+          "多个规则一行写法",
+          '[{"pattern":"联通优选","replacement":"HK"},{"pattern":"Mbps","replacement":"1"}]'
         ].join("\\n");
         help.innerHTML = '<summary>改名/替换规则案例（复制到上面的 JSON 框）</summary>' +
-          '<p class="muted">pattern 是 JavaScript 正则表达式；replacement 是替换后的文字；多个规则会按顺序执行。</p>' +
+          '<p class="muted">pattern 是 JavaScript 正则表达式；replacement 是替换后的文字；多个规则会按顺序执行，请放在同一个数组中（粘贴多个数组也会自动合并）。</p>' +
           '<pre><code>' + helpText + '</code></pre>';
         card.appendChild(help);
         const previewButton = document.createElement("button");
@@ -207,9 +220,7 @@ const ADMIN_HTML = `<!doctype html>
           previewButton.disabled = true;
           previewGrid.replaceChildren();
           try {
-            let renameRules;
-            try { renameRules = JSON.parse(card.querySelector("[data-field='renameRules']").value); } catch { throw new Error("改名规则必须是合法 JSON"); }
-            if (!Array.isArray(renameRules)) throw new Error("改名规则必须是数组，例如 []");
+            const renameRules = parseRenameRulesInput(card.querySelector("[data-field='renameRules']").value, index);
             const data = await api("/api/admin/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.id, renameRules }) });
             renderPreviewPane(previewGrid, "原版", data.original || []);
             renderPreviewPane(previewGrid, "规则修改后", data.modified || []);
@@ -245,9 +256,7 @@ const ADMIN_HTML = `<!doctype html>
         if (!/^https?:\\/\\//i.test(sourceUrl)) {
           throw new Error("订阅 " + (index + 1) + " 的源头订阅地址必须以 https:// 或 http:// 开头");
         }
-        let renameRules;
-        try { renameRules = JSON.parse(value("renameRules")); } catch { throw new Error("改名规则必须是合法 JSON"); }
-        if (!Array.isArray(renameRules)) throw new Error("订阅 " + (index + 1) + " 的改名规则必须是数组，例如 []");
+        const renameRules = parseRenameRulesInput(value("renameRules"), index);
         return {
           id,
           name,
