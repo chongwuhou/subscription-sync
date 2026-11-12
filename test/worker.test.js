@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker, { refresh, refreshAll } from "../src/worker.js";
+import worker, { refresh, refreshAggregate, refreshAll } from "../src/worker.js";
 
 class MemoryKV {
   constructor() {
@@ -108,6 +108,7 @@ test("multiple subscriptions have isolated state", async () => {
         publicToken: "backup-token"
       }
     ]),
+    AGGREGATE_PUBLIC_TOKEN: "all-token",
     SUBSCRIPTION_STATE: state
   };
   globalThis.fetch = async (request) => {
@@ -118,6 +119,9 @@ test("multiple subscriptions have isolated state", async () => {
   try {
     const results = await refreshAll(env, new Date("2026-11-12T01:00:00.000Z"));
     assert.deepEqual(results.map((item) => item.action), ["initialize", "initialize"]);
+    const aggregate = await refreshAggregate(env, new Date("2026-11-12T01:00:00.000Z"));
+    assert.equal(aggregate.action, "initialize");
+    assert.equal(aggregate.validCount, 2);
     assert.match(await state.get("published-state-v1:main"), /subscriptionId/);
     assert.match(await state.get("published-state-v1:backup"), /backup.example.com/);
 
@@ -138,6 +142,12 @@ test("multiple subscriptions have isolated state", async () => {
     const singBoxResponse = await worker.fetch(new Request("https://worker.example.com/sub/main-token?target=sing-box"), env);
     assert.equal(singBoxResponse.status, 200);
     assert.equal(JSON.parse(await singBoxResponse.text()).outbounds[0].tag, "PROXY");
+
+    const aggregateResponse = await worker.fetch(new Request("https://worker.example.com/sub/all-token"), env);
+    assert.equal(aggregateResponse.status, 200);
+    const aggregateText = await aggregateResponse.text();
+    assert.match(aggregateText, /one\.example\.com/);
+    assert.match(aggregateText, /backup\.example\.com/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -168,7 +178,7 @@ test("admin API manages subscriptions and refresh interval without public access
         id: "main",
         name: "主订阅",
         sourceUrl: "https://source.example.com/sub?token=REDACTED",
-        renameRules: [{ pattern: "\\s+\\|\\s+", replacement: "-" }],
+        renameRules: [],
         minValidNodes: 1,
         defaultTarget: "base64"
       }]
@@ -188,6 +198,8 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.equal(body.managed, true);
   assert.equal(body.subscriptions[0].sourceUrl, "https://source.example.com/sub?token=REDACTED");
   assert.match(body.subscriptions[0].publicToken, /^[A-Za-z0-9_-]{24,64}$/);
+  assert.deepEqual(body.subscriptions[0].renameRules, []);
+  assert.match(body.aggregatePublicToken, /^[A-Za-z0-9_-]{24,64}$/);
   assert.equal(body.subscriptions[0].minValidNodes, 1);
   assert.equal(body.refreshIntervalMinutes, 15);
 
@@ -197,7 +209,7 @@ test("admin API manages subscriptions and refresh interval without public access
     const previewResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/preview", {
       method: "POST",
       headers,
-      body: JSON.stringify({ id: "main" })
+      body: JSON.stringify({ id: "main", renameRules: [{ pattern: "\\s+\\|\\s+", replacement: "-" }] })
     }), env);
     assert.equal(previewResponse.status, 200);
     const preview = await previewResponse.json();
