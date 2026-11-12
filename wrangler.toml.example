@@ -25,6 +25,8 @@ crons = ["*/30 * * * *"]
 
 [vars]
 # Keep the actual source URL and public token out of this file.
-# SOURCE_URL, PUBLIC_PATH_TOKEN and RENAME_RULES_JSON should be configured as
-# secrets or private environment variables by the operator.
+# SOURCE_URL, PUBLIC_PATH_TOKEN, RENAME_RULES_JSON and SUBSCRIPTIONS_JSON
+# should be configured as secrets or private environment variables by the
+# operator. SUBSCRIPTIONS_JSON takes precedence over the single-subscription
+# variables.
 
