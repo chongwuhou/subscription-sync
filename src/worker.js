@@ -1,4 +1,4 @@
-import { buildCandidate, buildPreview, decidePublication } from "./core.js";
+import { buildAggregateCandidate, buildCandidate, buildPreview, decidePublication } from "./core.js";
 import {
   parseSubscriptionProfiles,
   parseSubscriptionProfilesJson,
@@ -10,6 +10,8 @@ import { detectTarget, renderSubscription, supportedTargets } from "./formats.js
 const DEFAULT_MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const ADMIN_CONFIG_KEY = "subscription-config-v1";
 const ADMIN_SETTINGS_KEY = "subscription-settings-v1";
+const AGGREGATE_PUBLIC_TOKEN_KEY = "subscription-aggregate-config-v1";
+const AGGREGATE_STATE_ID = "__all__";
 const LAST_REFRESH_KEY = "subscription-refresh-meta-v1";
 const DEFAULT_REFRESH_INTERVAL_MINUTES = 30;
 
@@ -49,11 +51,13 @@ const ADMIN_HTML = `<!doctype html>
   <label>自动刷新间隔（分钟，5-1440，按 5 分钟粒度）<input id="interval" type="number" min="5" max="1440" step="5" value="30" disabled></label>
   <p class="notice">保存后，订阅地址、改名规则和刷新间隔会写入 Cloudflare KV；以后重新打开或点击“重新读取”仍会保留。只有管理员令牌可以读取源地址。</p>
   <div id="status"></div>
+  <div id="aggregate"></div>
   <div id="profiles"></div>
   <div class="actions-bottom"><button id="save-bottom" disabled>保存订阅配置</button><span class="muted"> 保存后会保留在 Cloudflare KV</span></div>
   <script>
-    const state = { token: "", profiles: [], refreshIntervalMinutes: 30 };
+    const state = { token: "", profiles: [], aggregatePublicToken: "", refreshIntervalMinutes: 30 };
     const status = document.getElementById("status");
+    const aggregateRoot = document.getElementById("aggregate");
     const root = document.getElementById("profiles");
     const interval = document.getElementById("interval");
     const buttons = ["reload", "save", "save-bottom", "refresh", "add"].map((id) => document.getElementById(id));
@@ -111,7 +115,37 @@ const ADMIN_HTML = `<!doctype html>
       pane.appendChild(list);
       parent.appendChild(pane);
     }
+    function renderAggregate() {
+      aggregateRoot.replaceChildren();
+      const card = document.createElement("fieldset");
+      const legend = document.createElement("legend");
+      legend.textContent = "全部订阅汇总";
+      card.appendChild(legend);
+      const link = addField(card, "aggregateLink", "汇总后的通用订阅地址（所有已发布有效节点，一键订阅）", publicLinkFor(state.aggregatePublicToken), "url", location.origin + "/sub/汇总地址");
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.textContent = "复制汇总地址";
+      copy.onclick = async () => {
+        const text = link.value.trim();
+        if (!text) { setStatus("请先保存订阅配置，系统会生成汇总地址"); return; }
+        try {
+          await navigator.clipboard.writeText(text);
+          setStatus("已复制全部订阅汇总地址");
+        } catch {
+          link.focus();
+          link.select();
+          setStatus("浏览器禁止自动复制，请按 Ctrl+C 复制已选中的汇总地址");
+        }
+      };
+      card.appendChild(copy);
+      const note = document.createElement("p");
+      note.className = "muted";
+      note.textContent = "汇总地址会合并所有源头订阅的已发布有效节点；某个源头失效时保留它上一次的有效版本。修改 /sub/ 后面的路径后点击保存即可。";
+      card.appendChild(note);
+      aggregateRoot.appendChild(card);
+    }
     function render() {
+      renderAggregate();
       root.replaceChildren();
       if (state.profiles.length === 0) {
         const empty = document.createElement("p");
@@ -173,10 +207,13 @@ const ADMIN_HTML = `<!doctype html>
           previewButton.disabled = true;
           previewGrid.replaceChildren();
           try {
-            const data = await api("/api/admin/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.id }) });
+            let renameRules;
+            try { renameRules = JSON.parse(card.querySelector("[data-field='renameRules']").value); } catch { throw new Error("改名规则必须是合法 JSON"); }
+            if (!Array.isArray(renameRules)) throw new Error("改名规则必须是数组，例如 []");
+            const data = await api("/api/admin/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.id, renameRules }) });
             renderPreviewPane(previewGrid, "原版", data.original || []);
             renderPreviewPane(previewGrid, "规则修改后", data.modified || []);
-            setStatus("已加载原版与规则修改后的节点预览；预览不显示 UUID、密码等凭据");
+            setStatus("已按当前文本框中的规则加载预览；预览不显示 UUID、密码等凭据。需要长期生效请点击“保存本订阅”或“保存订阅配置”");
           } catch (error) { setStatus(error.message); }
           finally { previewButton.disabled = false; }
         };
@@ -226,6 +263,7 @@ const ADMIN_HTML = `<!doctype html>
       try {
         const data = await api("/api/admin/subscriptions");
         state.profiles = data.subscriptions || [];
+        state.aggregatePublicToken = data.aggregatePublicToken || "";
         state.refreshIntervalMinutes = data.refreshIntervalMinutes || 30;
         interval.value = state.refreshIntervalMinutes;
         interval.disabled = false;
@@ -248,8 +286,10 @@ const ADMIN_HTML = `<!doctype html>
     async function saveAll(focusIndex = null) {
       try {
         const subscriptions = collect();
+        const aggregateLink = aggregateRoot.querySelector("[data-field='aggregateLink']");
+        const aggregatePublicToken = aggregateLink ? publicTokenFromLink(aggregateLink.value, 0) : "";
         if (subscriptions.length === 0) throw new Error("当前没有订阅配置，请先点击“新增订阅”并填写完整后再保存");
-        await api("/api/admin/subscriptions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscriptions }) });
+        await api("/api/admin/subscriptions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscriptions, aggregatePublicToken }) });
         await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value) }) });
         const scope = focusIndex ? "第 " + focusIndex + " 个订阅" : subscriptions.length + " 个订阅";
         await load();
@@ -366,6 +406,41 @@ function createPublicToken() {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+function parseAggregateToken(raw) {
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    return String(parsed?.publicToken ?? "").trim();
+  } catch {
+    return String(raw).trim();
+  }
+}
+
+async function loadAggregateToken(env) {
+  if (env.SUBSCRIPTION_STATE?.get) {
+    const stored = await env.SUBSCRIPTION_STATE.get(AGGREGATE_PUBLIC_TOKEN_KEY);
+    const token = parseAggregateToken(stored);
+    if (token) return token;
+  }
+  return String(env.AGGREGATE_PUBLIC_TOKEN ?? "").trim();
+}
+
+async function ensureAggregateToken(env, requested = "") {
+  const candidate = String(requested ?? "").trim();
+  if (candidate && /^[A-Za-z0-9_-]{1,128}$/.test(candidate)) {
+    if (env.SUBSCRIPTION_STATE?.put) {
+      await env.SUBSCRIPTION_STATE.put(AGGREGATE_PUBLIC_TOKEN_KEY, JSON.stringify({ publicToken: candidate }));
+    }
+    return candidate;
+  }
+  const existing = await loadAggregateToken(env);
+  if (existing) return existing;
+  if (!env.SUBSCRIPTION_STATE?.put) return "";
+  const generated = createPublicToken();
+  await env.SUBSCRIPTION_STATE.put(AGGREGATE_PUBLIC_TOKEN_KEY, JSON.stringify({ publicToken: generated }));
+  return generated;
+}
+
 async function loadSettings(env) {
   if (env.SUBSCRIPTION_STATE?.get) {
     const stored = await env.SUBSCRIPTION_STATE.get(ADMIN_SETTINGS_KEY);
@@ -445,7 +520,8 @@ async function handleAdminApi(request, env, url) {
   if (url.pathname === "/api/admin/subscriptions" && request.method === "GET") {
     const current = await storedProfiles(env);
     const settings = await loadSettings(env);
-    return json({ managed: current.managed, subscriptions: current.profiles, refreshIntervalMinutes: settings.refreshIntervalMinutes });
+    const aggregatePublicToken = await ensureAggregateToken(env);
+    return json({ managed: current.managed, subscriptions: current.profiles, aggregatePublicToken, refreshIntervalMinutes: settings.refreshIntervalMinutes });
   }
   if (url.pathname === "/api/admin/subscriptions" && request.method === "PUT") {
     try {
@@ -465,6 +541,7 @@ async function handleAdminApi(request, env, url) {
       const checked = validateSubscriptionProfiles(prepared);
       if (checked.error) return json({ error: checked.error }, 400);
       await env.SUBSCRIPTION_STATE.put(ADMIN_CONFIG_KEY, JSON.stringify(checked.profiles));
+      await ensureAggregateToken(env, body?.aggregatePublicToken);
       return json({ ok: true, count: checked.profiles.length });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "invalid-json" }, 400);
@@ -490,7 +567,8 @@ async function handleAdminApi(request, env, url) {
       const profile = (await loadProfiles(env)).find((item) => item.id === id);
       if (!profile) return json({ error: "subscription-not-found" }, 404);
       const rawText = await fetchSource(env, profile);
-      const preview = buildPreview(rawText, { renameRules: profile.renameRules });
+      const renameRules = Array.isArray(body?.renameRules) ? body.renameRules : profile.renameRules;
+      const preview = buildPreview(rawText, { renameRules });
       return json({
         subscriptionId: profile.id,
         original: preview.original.map(previewNode),
@@ -501,11 +579,14 @@ async function handleAdminApi(request, env, url) {
     }
   }
   if (url.pathname === "/api/admin/refresh" && request.method === "POST") {
-    return json({ results: (await refreshAll(env)).map(summarizeRefreshResult) });
+    const refreshed = await refreshEverything(env);
+    return json({ results: refreshed.results.map(summarizeRefreshResult), aggregate: summarizeRefreshResult(refreshed.aggregate) });
   }
   if (url.pathname === "/api/admin/subscriptions/reset" && request.method === "POST") {
     if (!env.SUBSCRIPTION_STATE.delete) return json({ error: "state-store-does-not-support-delete" }, 503);
     await env.SUBSCRIPTION_STATE.delete(ADMIN_CONFIG_KEY);
+    await env.SUBSCRIPTION_STATE.delete(AGGREGATE_PUBLIC_TOKEN_KEY);
+    await env.SUBSCRIPTION_STATE.delete(stateKey(AGGREGATE_STATE_ID));
     return json({ ok: true, managed: false });
   }
   return json({ error: "not-found" }, 404);
@@ -590,14 +671,53 @@ export async function refreshAll(env, now = new Date()) {
   return results;
 }
 
+export async function refreshAggregate(env, now = new Date(), profiles = null) {
+  const sourceProfiles = profiles ?? await loadProfiles(env);
+  if (sourceProfiles.length === 0) return { subscriptionId: "all", action: "keep", reason: "no-subscriptions-configured" };
+  if (!env.SUBSCRIPTION_STATE?.get || !env.SUBSCRIPTION_STATE?.put) {
+    return { subscriptionId: "all", action: "keep", reason: "state-store-not-configured" };
+  }
+  const nodeGroups = [];
+  for (const profile of sourceProfiles) {
+    const state = await loadState(env, profile.id);
+    if (Array.isArray(state?.nodes) && state.nodes.length > 0) nodeGroups.push(state.nodes);
+  }
+  let candidate;
+  try {
+    candidate = await buildAggregateCandidate(nodeGroups);
+  } catch (error) {
+    return { subscriptionId: "all", action: "keep", reason: "aggregate-error", error: error instanceof Error ? error.message : "unknown" };
+  }
+  const previous = await loadState(env, AGGREGATE_STATE_ID);
+  const decision = decidePublication(candidate, previous);
+  if (decision.action === "keep") return { subscriptionId: "all", ...decision };
+  await saveState(env, AGGREGATE_STATE_ID, {
+    version: 1,
+    subscriptionId: "all",
+    contentHash: decision.contentHash,
+    validCount: decision.validCount,
+    updatedAt: now.toISOString(),
+    nodes: decision.nodes,
+    output: decision.output
+  });
+  return { subscriptionId: "all", ...decision };
+}
+
+export async function refreshEverything(env, now = new Date()) {
+  const profiles = await loadProfiles(env);
+  const results = await refreshAll(env, now);
+  const aggregate = await refreshAggregate(env, now, profiles);
+  return { results, aggregate };
+}
+
 export async function refresh(env, now = new Date()) {
   return (await refreshAll(env, now))[0];
 }
 
-async function servePublished(env, profile, request) {
-  const state = await loadState(env, profile.id);
+async function servePublishedState(env, stateId, defaultTarget, request) {
+  const state = await loadState(env, stateId);
   if (!state?.output) return new Response("No valid subscription has been published yet", { status: 503 });
-  const target = detectTarget(request, profile.defaultTarget);
+  const target = detectTarget(request, defaultTarget);
   if (!target || !supportedTargets.includes(target)) {
     return json({ error: "unsupported-target", supportedTargets }, 406);
   }
@@ -627,6 +747,10 @@ async function servePublished(env, profile, request) {
   });
 }
 
+async function servePublished(env, profile, request) {
+  return servePublishedState(env, profile.id, profile.defaultTarget, request);
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -644,6 +768,10 @@ export default {
       const token = url.pathname.slice("/sub/".length);
       const profile = profiles.find((item) => item.publicToken === token);
       if (profile) return servePublished(env, profile, request);
+      const aggregateToken = await loadAggregateToken(env);
+      if (token && aggregateToken && token === aggregateToken) {
+        return servePublishedState(env, AGGREGATE_STATE_ID, "clash", request);
+      }
     }
     return new Response("Not found", { status: 404 });
   },
@@ -655,8 +783,8 @@ export default {
       console.log(JSON.stringify({ event: "subscription-refresh-skipped", reason: "interval-not-due", intervalMinutes: schedule.settings.refreshIntervalMinutes }));
       return;
     }
-    const results = await refreshAll(env);
-    for (const result of results) {
+    const refreshed = await refreshEverything(env, now);
+    for (const result of [...refreshed.results, refreshed.aggregate]) {
       console.log(JSON.stringify({
         event: "subscription-refresh",
         subscriptionId: result.subscriptionId ?? null,
