@@ -10,6 +10,19 @@ compatibility_date = "2026-01-01"
 binding = "SUBSCRIPTION_STATE"
 id = "replace-with-an-approved-kv-namespace-id"
 
+[triggers]
+# The Worker fetches the source on a schedule. Public requests only serve the
+# last good version from KV.
+crons = ["*/30 * * * *"]
+
+# Optional: enable this binding when an audit history is desired. The SQL
+# migration stores no source URL, Token, or generated subscription body.
+# [[d1_databases]]
+# binding = "SUBSCRIPTION_AUDIT"
+# database_name = "subscription-sync-audit"
+# database_id = "replace-with-an-approved-d1-database-id"
+# migrations_dir = "migrations"
+
 [vars]
 # Keep the actual source URL and public token out of this file.
 # SOURCE_URL, PUBLIC_PATH_TOKEN and RENAME_RULES_JSON should be configured as
