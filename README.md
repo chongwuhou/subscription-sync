@@ -16,7 +16,8 @@
 8. 没有变化时保留对应旧版本。
 9. 新内容解析失败、为空或没有有效节点时只保留当前源旧版本，不影响其他订阅。
 10. 对外提供每个源的固定链接，更新内容时不要求客户端更换订阅地址。
-11. 不发送邮件、不上传订阅内容到分析服务、不记录 Token、不接受公开 URL 参数。
+11. 同一固定链接根据客户端 User-Agent 自动适配 Clash/Mihomo、Base64 分享链接或 sing-box，也支持 `?target=` 强制指定格式。
+12. 不发送邮件、不上传订阅内容到分析服务、不记录 Token、不接受公开源地址参数。
 
 ## 开源与后门审查
 
@@ -51,6 +52,7 @@ npm run check
 - `PUBLIC_PATH_TOKEN`：固定通用链接中的随机路径片段。
 - `RENAME_RULES_JSON`：例如 `[{"pattern":"\\s+\\|\\s+","replacement":"-"}]`。
 - `MIN_VALID_NODES`：最低有效节点数，默认 1。
+- `DEFAULT_TARGET`：无法从 User-Agent 判断时的默认输出格式，默认 `clash`。
 - `SUBSCRIPTION_STATE`：保存最后一个成功版本的状态存储绑定。
 - `SUBSCRIPTIONS_JSON`：多订阅配置。配置后优先于单订阅变量，例如：
 
@@ -62,7 +64,8 @@ npm run check
     "sourceUrl": "https://provider.example/sub?token=REDACTED",
     "publicToken": "main-random-token",
     "renameRules": [{"pattern": "\\s+\\|\\s+", "replacement": "-"}],
-    "minValidNodes": 1
+    "minValidNodes": 1,
+    "defaultTarget": "clash"
   },
   {
     "id": "backup",
@@ -74,6 +77,8 @@ npm run check
 ```
 
 自动刷新和 Cloudflare 配置说明见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+
+固定链接默认自动识别客户端，也可以显式指定：`?target=clash`、`?target=base64`、`?target=sing-box` 或 `?target=links`。`mihomo`、`stash` 等别名会映射到 Clash YAML；V2Ray、Shadowrocket、Surge、Loon、Quantumult X 等别名会映射到 Base64 分享链接。
 
 `wrangler.toml.example` 是不绑定账号资源的公开模板；生产 `wrangler.toml` 只记录资源 ID，真实地址、Token 和规则仍放在 Cloudflare 私有配置中。
 
