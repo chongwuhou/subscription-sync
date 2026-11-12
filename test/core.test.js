@@ -52,6 +52,15 @@ test("applies multiple rules even when pasted as nested arrays", () => {
   assert.equal(preview.modified[0].name, "HK | 1");
 });
 
+test("replaces non-name fields only when the advanced option is enabled", async () => {
+  const candidate = await buildCandidate(sampleClash, {
+    renameRules: [{ pattern: "alpha", replacement: "beta", flags: "gi" }],
+    replaceAllFields: true
+  });
+  assert.equal(candidate.nodes[0].name, "US | beta");
+  assert.equal(candidate.nodes[0].server, "beta.example.com");
+});
+
 test("merges published nodes from multiple sources for one aggregate candidate", async () => {
   const first = (await buildCandidate(sampleClash)).nodes;
   const second = first.map((node) => ({ ...node, name: `Backup ${node.name}`, server: "backup.example.com" }));
