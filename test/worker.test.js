@@ -14,6 +14,10 @@ class MemoryKV {
   async put(key, value) {
     this.values.set(key, value);
   }
+
+  async delete(key) {
+    this.values.delete(key);
+  }
 }
 
 class MemoryD1 {
@@ -137,5 +141,48 @@ test("multiple subscriptions have isolated state", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("admin API manages subscriptions and refresh interval without public access", async () => {
+  const state = new MemoryKV();
+  const env = { SUBSCRIPTION_STATE: state, ADMIN_TOKEN: "admin-secret" };
+  const page = await worker.fetch(new Request("https://worker.example.com/admin"), env);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /输入管理员令牌/);
+
+  const unauthorized = await worker.fetch(new Request("https://worker.example.com/api/admin/subscriptions"), env);
+  assert.equal(unauthorized.status, 401);
+
+  const headers = { authorization: "Bearer admin-secret", "content-type": "application/json" };
+  const update = await worker.fetch(new Request("https://worker.example.com/api/admin/subscriptions", {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({
+      subscriptions: [{
+        id: "main",
+        name: "主订阅",
+        sourceUrl: "https://source.example.com/sub?token=REDACTED",
+        publicToken: "main-token",
+        renameRules: [{ pattern: "\\s+\\|\\s+", replacement: "-" }],
+        minValidNodes: 2,
+        defaultTarget: "base64"
+      }]
+    })
+  }), env);
+  assert.equal(update.status, 200);
+
+  const settings = await worker.fetch(new Request("https://worker.example.com/api/admin/settings", {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ refreshIntervalMinutes: 15 })
+  }), env);
+  assert.equal(settings.status, 200);
+
+  const read = await worker.fetch(new Request("https://worker.example.com/api/admin/subscriptions", { headers }), env);
+  const body = await read.json();
+  assert.equal(body.managed, true);
+  assert.equal(body.subscriptions[0].sourceUrl, "https://source.example.com/sub?token=REDACTED");
+  assert.equal(body.subscriptions[0].minValidNodes, 2);
+  assert.equal(body.refreshIntervalMinutes, 15);
 });
 
