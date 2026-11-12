@@ -140,3 +140,27 @@ test("renders multiple client formats and detects common client user agents", as
   assert.equal(JSON.parse(singBox.body).outbounds[0].tag, "PROXY");
 });
 
+test("renders configurable Clash rule providers and expands all nodes in proxy groups", async () => {
+  const candidate = await buildCandidate(sampleClash, {
+    clashConfig: {
+      "proxy-groups": [
+        { name: "🚀 节点选择", type: "select", proxies: ["DIRECT", "{{NODES}}"] }
+      ],
+      "rule-providers": {
+        ads: {
+          type: "http",
+          behavior: "domain",
+          url: "https://rules.example.com/ads.yaml",
+          path: "./ruleset/ads.yaml",
+          interval: 86400
+        }
+      },
+      rules: ["RULE-SET,ads,REJECT", "MATCH,🚀 节点选择"]
+    }
+  });
+  assert.match(candidate.output, /rule-providers:/);
+  assert.match(candidate.output, /RULE-SET,ads,REJECT/);
+  assert.match(candidate.output, /alpha\.example\.com/);
+  assert.match(candidate.output, /🚀 节点选择/);
+});
+
