@@ -65,6 +65,14 @@ test("supports VMess and VLESS share links", () => {
   assert.equal(vless["ws-opts"].path, "/edge");
 });
 
+test("supports an SSR share link", () => {
+  const payload = `ssr.example.com:443:origin:aes-256-gcm:plain:${btoa("secret")}/?remarks=${btoa("SSR Test")}`;
+  const node = parseShareLink(`ssr://${btoa(payload)}`);
+  assert.equal(node.type, "ssr");
+  assert.equal(node.password, "secret");
+  assert.equal(node.name, "SSR Test");
+});
+
 test("decodes a Base64 share-link subscription", () => {
   const input = "vless://11111111-1111-1111-1111-111111111111@node.example.com:443?security=tls#Node";
   const encoded = btoa(input);
