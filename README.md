@@ -19,7 +19,8 @@
 11. 同一固定链接根据客户端 User-Agent 自动适配 Clash/Mihomo、Base64 分享链接或 sing-box，也支持 `?target=` 强制指定格式。
 12. 不发送邮件、不上传订阅内容到分析服务、不记录 Token、不接受公开源地址参数。
 13. 每次抓取到满足最低有效节点数的源节点快照都会保存到 D1；源站暂时不可用时，从最近有效快照重新套用当前改名和 Clash 配置。
-13. Clash/Mihomo 配置可在后台统一维护代理组、Rule Providers 和 `rules`；代理组中的 `{{NODES}}` 会自动展开为当前有效节点。
+14. Clash/Mihomo 配置可在后台统一维护代理组、Rule Providers 和 `rules`；代理组中的 `{{NODES}}` 会自动展开为当前有效节点。
+15. 管理员可以为单个订阅手动上传 Clash YAML；上传内容验证通过后会作为该订阅的历史源保存到 D1，并立即参与单订阅和汇总订阅。
 
 ## 开源与后门审查
 
@@ -84,7 +85,7 @@ npm run check
 
 固定链接默认自动识别客户端，也可以显式指定：`?target=clash`、`?target=base64`、`?target=sing-box` 或 `?target=links`。`mihomo`、`stash` 等别名会映射到 Clash YAML；V2Ray、Shadowrocket、Surge、Loon、Quantumult X 等别名会映射到 Base64 分享链接。
 
-管理员后台地址为 `/admin`。输入 `ADMIN_TOKEN` 后可维护源头订阅地址、改名规则、多订阅 Token、最低有效节点数、默认输出格式、自动刷新间隔，以及统一的 Clash/Mihomo 分流配置；令牌只在当前页面内存中使用，不写入浏览器存储。
+管理员后台地址为 `/admin`。输入 `ADMIN_TOKEN` 后可维护源头订阅地址、改名规则、多订阅 Token、最低有效节点数、默认输出格式、自动刷新间隔，以及统一的 Clash/Mihomo 分流配置；每个订阅还可以手动上传 YAML 作为历史源；令牌只在当前页面内存中使用，不写入浏览器存储。
 
 Clash 分流配置示例（后台的折叠项中填写）：
 
