@@ -29,21 +29,29 @@ const ADMIN_HTML = `<!doctype html>
     button { margin: .35rem .5rem .35rem 0; padding: .55rem .8rem; font: inherit; cursor: pointer; }
     #status { min-height: 1.5rem; white-space: pre-wrap; }
     .muted { opacity: .75; }
+    .notice { padding: .7rem .9rem; border-radius: 6px; background: #16803c18; border: 1px solid #16803c55; }
+    .rules-help { margin: .4rem 0 1rem; padding: .6rem .8rem; border: 1px solid #8885; border-radius: 6px; }
+    .rules-help summary { cursor: pointer; font-weight: 600; }
+    .rules-help pre { overflow-x: auto; white-space: pre-wrap; font-size: .9rem; }
+    .rules-help code { font-family: ui-monospace, monospace; }
+    .actions-bottom { position: sticky; bottom: 0; margin: 1rem 0 3rem; padding: .7rem; background: Canvas; border: 1px solid #8885; border-radius: 8px; }
   </style>
 </head>
 <body>
   <h1>Subscription Sync 管理</h1>
-  <p class="muted">管理源头订阅地址、节点改名规则、最低有效节点数和客户端输出格式。配置只保存到受保护的 Cloudflare KV。</p>
-  <p><button id="login">输入管理员令牌</button> <button id="reload" disabled>重新读取</button> <button id="save" disabled>保存全部订阅</button> <button id="refresh" disabled>立即刷新</button> <button id="add" disabled>新增订阅</button></p>
+  <p class="muted">管理源头订阅地址、节点改名规则、最低有效节点数和客户端输出格式。配置只保存到受保护的 Cloudflare KV，不保存在浏览器。</p>
+  <p><button id="login">输入管理员令牌</button> <button id="reload" disabled>重新读取</button> <button id="save" disabled>保存订阅配置</button> <button id="refresh" disabled>立即刷新</button> <button id="add" disabled>新增订阅</button></p>
   <label>自动刷新间隔（分钟，5-1440，按 5 分钟粒度）<input id="interval" type="number" min="5" max="1440" step="5" value="30" disabled></label>
+  <p class="notice">保存后，订阅地址、改名规则和刷新间隔会写入 Cloudflare KV；以后重新打开或点击“重新读取”仍会保留。只有管理员令牌可以读取源地址。</p>
   <div id="status"></div>
   <div id="profiles"></div>
+  <div class="actions-bottom"><button id="save-bottom" disabled>保存订阅配置</button><span class="muted"> 保存后会保留在 Cloudflare KV</span></div>
   <script>
     const state = { token: "", profiles: [], refreshIntervalMinutes: 30 };
     const status = document.getElementById("status");
     const root = document.getElementById("profiles");
     const interval = document.getElementById("interval");
-    const buttons = ["reload", "save", "refresh", "add"].map((id) => document.getElementById(id));
+    const buttons = ["reload", "save", "save-bottom", "refresh", "add"].map((id) => document.getElementById(id));
     const setStatus = (text) => { status.textContent = text || ""; };
     const setEnabled = (enabled) => buttons.forEach((button) => { button.disabled = !enabled; });
     async function api(path, options) {
@@ -55,13 +63,14 @@ const ADMIN_HTML = `<!doctype html>
       if (!response.ok) throw new Error(data && data.error ? data.error : "请求失败 " + response.status);
       return data;
     }
-    function addField(parent, key, label, value, type) {
+    function addField(parent, key, label, value, type, placeholder) {
       const wrapper = document.createElement("label");
       wrapper.textContent = label;
       const input = type === "textarea" ? document.createElement("textarea") : document.createElement("input");
       if (type && type !== "textarea") input.type = type;
       input.dataset.field = key;
       input.value = value == null ? "" : String(value);
+      if (placeholder) input.placeholder = placeholder;
       wrapper.appendChild(input);
       parent.appendChild(wrapper);
     }
@@ -72,13 +81,34 @@ const ADMIN_HTML = `<!doctype html>
         const legend = document.createElement("legend");
         legend.textContent = "订阅 " + (index + 1);
         card.appendChild(legend);
-        addField(card, "id", "ID", profile.id);
-        addField(card, "name", "名称", profile.name);
-        addField(card, "sourceUrl", "源头订阅地址（仅管理员可见）", profile.sourceUrl);
-        addField(card, "publicToken", "固定链接路径 Token", profile.publicToken);
+        addField(card, "id", "ID", profile.id, "text", "例如：main 或 backup");
+        addField(card, "name", "名称", profile.name, "text", "例如：主订阅");
+        addField(card, "sourceUrl", "源头订阅地址（仅管理员可见）", profile.sourceUrl, "url", "https://供应商.example/subscribe?token=...");
+        addField(card, "publicToken", "固定链接路径 Token", profile.publicToken, "text", "例如：main-random-token");
         addField(card, "minValidNodes", "最低有效节点数", profile.minValidNodes || 1, "number");
-        addField(card, "defaultTarget", "无法识别客户端时的格式（clash/base64/sing-box/links）", profile.defaultTarget || "clash");
-        addField(card, "renameRules", "改名规则 JSON", JSON.stringify(profile.renameRules || [], null, 2), "textarea");
+        addField(card, "defaultTarget", "无法识别客户端时的格式（clash/base64/sing-box/links）", profile.defaultTarget || "clash", "text", "clash");
+        addField(card, "renameRules", "改名规则 JSON", JSON.stringify(profile.renameRules || [], null, 2), "textarea", '[{"pattern":"\\\\s*\\\\|\\\\s*","replacement":"-"}]');
+        const help = document.createElement("details");
+        help.className = "rules-help";
+        help.innerHTML = '<summary>改名/替换规则案例（复制到上面的 JSON 框）</summary>' +
+          '<p class="muted">pattern 是 JavaScript 正则表达式；replacement 是替换后的文字；多个规则会按顺序执行。</p>' +
+          '<pre><code>1. 把 “US | New York” 变成 “US-New York”
+[{"pattern":"\\s*\\|\\s*","replacement":"-"}]
+
+2. 删除节点名前后的中括号
+[{"pattern":"[\\[\\]]","replacement":""}]
+
+3. 把地区名称统一改名
+[{"pattern":"香港","replacement":"HK"},{"pattern":"新加坡","replacement":"SG"}]
+
+4. 删除名称开头的机场标签
+[{"pattern":"^\\s*机场[-_ ]*","replacement":""}]</code></pre>';
+        card.appendChild(help);
+        const saveOne = document.createElement("button");
+        saveOne.type = "button";
+        saveOne.textContent = "保存本订阅";
+        saveOne.onclick = () => saveAll(index + 1);
+        card.appendChild(saveOne);
         const remove = document.createElement("button");
         remove.type = "button";
         remove.textContent = "删除此订阅";
@@ -88,15 +118,26 @@ const ADMIN_HTML = `<!doctype html>
       });
     }
     function collect() {
-      return Array.from(root.querySelectorAll("fieldset")).map((card) => {
+      return Array.from(root.querySelectorAll("fieldset")).map((card, index) => {
         const value = (key) => card.querySelector("[data-field='" + key + "']").value;
+        const id = value("id").trim();
+        const name = value("name").trim();
+        const sourceUrl = value("sourceUrl").trim();
+        const publicToken = value("publicToken").trim();
+        if (!id || !name || !sourceUrl || !publicToken) {
+          throw new Error("订阅 " + (index + 1) + " 还没有填写完整：ID、名称、源头订阅地址和固定链接 Token 都必填");
+        }
+        if (!/^https?:\\/\\//i.test(sourceUrl)) {
+          throw new Error("订阅 " + (index + 1) + " 的源头订阅地址必须以 https:// 或 http:// 开头");
+        }
         let renameRules;
         try { renameRules = JSON.parse(value("renameRules")); } catch { throw new Error("改名规则必须是合法 JSON"); }
+        if (!Array.isArray(renameRules)) throw new Error("订阅 " + (index + 1) + " 的改名规则必须是数组，例如 []");
         return {
-          id: value("id").trim(),
-          name: value("name").trim(),
-          sourceUrl: value("sourceUrl").trim(),
-          publicToken: value("publicToken").trim(),
+          id,
+          name,
+          sourceUrl,
+          publicToken,
           minValidNodes: Number(value("minValidNodes")),
           defaultTarget: value("defaultTarget").trim(),
           renameRules
@@ -112,7 +153,7 @@ const ADMIN_HTML = `<!doctype html>
         interval.disabled = false;
         setEnabled(true);
         render();
-        setStatus("已读取 " + state.profiles.length + " 个订阅（" + (data.managed ? "后台配置" : "环境变量回退") + "）");
+        setStatus("已读取 " + state.profiles.length + " 个订阅（" + (data.managed ? "Cloudflare KV 已保存配置" : "当前没有 KV 保存项，使用环境变量回退") + "）");
       } catch (error) { setStatus(error.message); }
     }
     document.getElementById("login").onclick = async () => {
@@ -126,14 +167,17 @@ const ADMIN_HTML = `<!doctype html>
       state.profiles.push({ id: "", name: "", sourceUrl: "", publicToken: "", minValidNodes: 1, defaultTarget: "clash", renameRules: [] });
       render();
     };
-    document.getElementById("save").onclick = async () => {
+    async function saveAll(focusIndex = null) {
       try {
         const subscriptions = collect();
         await api("/api/admin/subscriptions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscriptions }) });
         await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value) }) });
-        setStatus("已保存。下一次 Cron 刷新或点击“立即刷新”后生效。");
+        const scope = focusIndex ? "第 " + focusIndex + " 个订阅" : subscriptions.length + " 个订阅";
+        setStatus("已保存" + scope + "及刷新间隔到 Cloudflare KV。刷新页面后仍会保留；下一次 Cron 刷新或点击“立即刷新”后生效。");
       } catch (error) { setStatus(error.message); }
-    };
+    }
+    document.getElementById("save").onclick = () => saveAll();
+    document.getElementById("save-bottom").onclick = () => saveAll();
     document.getElementById("refresh").onclick = async () => {
       try { const data = await api("/api/admin/refresh", { method: "POST" }); setStatus(JSON.stringify(data.results, null, 2)); }
       catch (error) { setStatus(error.message); }
