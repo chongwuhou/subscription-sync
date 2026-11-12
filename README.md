@@ -6,16 +6,17 @@
 
 本项目按以下规则实现：
 
-1. 原始订阅地址只从私有配置读取，不写入源码。
-2. 定时抓取原始订阅。
-3. 支持常见 Clash YAML、JSON、Base64 分享链接格式，并覆盖 VMess、VLESS、Trojan、SS、SSR、Hysteria2、TUIC、HTTP/SOCKS5 等常见节点类型。
-4. 按用户配置的正则规则改名。
-5. 自动去重、排序并生成 Clash/Mihomo YAML。
-6. 新内容有至少一个有效节点且哈希发生变化时才更新。
-7. 没有变化时保留旧版本。
-8. 新内容解析失败、为空或没有有效节点时保留旧版本。
-9. 对外提供固定链接，更新内容时不要求客户端更换订阅地址。
-10. 不发送邮件、不上传订阅内容到分析服务、不记录 Token、不接受公开 URL 参数。
+1. 一个 Worker 可以管理多个独立订阅源，每个源拥有独立的规则、状态和固定链接。
+2. 原始订阅地址只从私有配置读取，不写入源码。
+3. 定时抓取原始订阅，多个源按顺序处理，避免同时冲击上游。
+4. 支持常见 Clash YAML、JSON、Base64 分享链接格式，并覆盖 VMess、VLESS、Trojan、SS、SSR、Hysteria2、TUIC、HTTP/SOCKS5 等常见节点类型。
+5. 按每个订阅源配置的正则规则改名。
+6. 自动去重、排序并生成 Clash/Mihomo YAML。
+7. 新内容有至少一个有效节点且哈希发生变化时才更新对应订阅。
+8. 没有变化时保留对应旧版本。
+9. 新内容解析失败、为空或没有有效节点时只保留当前源旧版本，不影响其他订阅。
+10. 对外提供每个源的固定链接，更新内容时不要求客户端更换订阅地址。
+11. 不发送邮件、不上传订阅内容到分析服务、不记录 Token、不接受公开 URL 参数。
 
 ## 开源与后门审查
 
@@ -39,7 +40,7 @@ npm test
 npm run check
 ```
 
-核心逻辑不需要访问网络。测试使用内置 Node.js 测试运行器，覆盖解析、重命名、去重、哈希变更门禁、空节点保护和 Worker 刷新流程。
+核心逻辑不需要访问网络。测试使用内置 Node.js 测试运行器，覆盖解析、重命名、去重、哈希变更门禁、空节点保护、多订阅隔离和 Worker 刷新流程。
 
 ## 配置概念
 
@@ -50,6 +51,26 @@ npm run check
 - `RENAME_RULES_JSON`：例如 `[{"pattern":"\\s+\\|\\s+","replacement":"-"}]`。
 - `MIN_VALID_NODES`：最低有效节点数，默认 1。
 - `SUBSCRIPTION_STATE`：保存最后一个成功版本的状态存储绑定。
+- `SUBSCRIPTIONS_JSON`：多订阅配置。配置后优先于单订阅变量，例如：
+
+```json
+[
+  {
+    "id": "main",
+    "name": "主订阅",
+    "sourceUrl": "https://provider.example/sub?token=REDACTED",
+    "publicToken": "main-random-token",
+    "renameRules": [{"pattern": "\\s+\\|\\s+", "replacement": "-"}],
+    "minValidNodes": 1
+  },
+  {
+    "id": "backup",
+    "name": "备用订阅",
+    "sourceUrl": "https://backup.example/sub?token=REDACTED",
+    "publicToken": "backup-random-token"
+  }
+]
+```
 
 自动刷新和 Cloudflare 配置说明见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
