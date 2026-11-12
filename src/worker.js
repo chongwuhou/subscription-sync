@@ -10,6 +10,7 @@ import {
 import { detectTarget, renderSubscription, supportedTargets } from "./formats.js";
 import { normalizeClashConfig } from "./clash.js";
 
+// Expired aggregate links are rendered with universal display-only VMess placeholders.
 const DEFAULT_MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const ADMIN_CONFIG_KEY = "subscription-config-v1";
 const ADMIN_SETTINGS_KEY = "subscription-settings-v1";
