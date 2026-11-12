@@ -53,6 +53,34 @@ export function buildPreview(rawText, options = {}) {
   return { original: sortNodes(original.values()), modified: sortNodes(modified.values()) };
 }
 
+export async function buildAggregateCandidate(nodeGroups, options = {}) {
+  const requestedMinimum = Number(options.minValidNodes ?? 1);
+  const minValidNodes = Number.isFinite(requestedMinimum)
+    ? Math.max(1, Math.floor(requestedMinimum))
+    : 1;
+  const deduped = new Map();
+  for (const group of Array.isArray(nodeGroups) ? nodeGroups : []) {
+    for (const item of Array.isArray(group) ? group : []) {
+      const node = normalizeNode(item, []);
+      if (!isValidNode(node)) continue;
+      deduped.set(identityWithoutName(node), node);
+    }
+  }
+  const nodes = sortNodes(deduped.values());
+  const valid = nodes.length >= minValidNodes;
+  const canonical = valid ? stableStringify(nodes) : null;
+  const hashFn = options.hashFn ?? sha256Hex;
+  const contentHash = valid ? await hashFn(canonical) : null;
+  return {
+    valid,
+    validCount: nodes.length,
+    minValidNodes,
+    contentHash,
+    nodes,
+    output: valid ? renderClashYaml(nodes) : null
+  };
+}
+
 export async function buildCandidate(rawText, options = {}) {
   const renameRules = Array.isArray(options.renameRules) ? options.renameRules : [];
   const requestedMinimum = Number(options.minValidNodes ?? 1);
