@@ -1,5 +1,6 @@
 import { buildCandidate, decidePublication } from "./core.js";
 import { parseSubscriptionProfiles, stateKey } from "./config.js";
+import { detectTarget, renderSubscription, supportedTargets } from "./formats.js";
 
 const DEFAULT_MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 
@@ -138,6 +139,7 @@ async function refreshProfile(env, profile, now) {
     contentHash: decision.contentHash,
     validCount: decision.validCount,
     updatedAt: now.toISOString(),
+    nodes: decision.nodes,
     output: decision.output
   });
   return finish(decision);
@@ -161,14 +163,34 @@ export async function refresh(env, now = new Date()) {
   return (await refreshAll(env, now))[0];
 }
 
-async function servePublished(env, profile) {
+async function servePublished(env, profile, request) {
   const state = await loadState(env, profile.id);
   if (!state?.output) return new Response("No valid subscription has been published yet", { status: 503 });
-  return new Response(state.output, {
+  const target = detectTarget(request, profile.defaultTarget);
+  if (!target || !supportedTargets.includes(target)) {
+    return json({ error: "unsupported-target", supportedTargets }, 406);
+  }
+
+  let rendered;
+  try {
+    // Older KV records contain only Clash YAML. Keep that format available
+    // while requiring one successful refresh before serving other targets.
+    rendered = state.nodes?.length
+      ? renderSubscription(state.nodes, target)
+      : target === "clash"
+        ? { body: state.output, contentType: "text/yaml; charset=utf-8" }
+        : null;
+  } catch {
+    rendered = null;
+  }
+  if (!rendered) return new Response("This target is unavailable until the next valid refresh", { status: 503 });
+  return new Response(rendered.body, {
     status: 200,
     headers: {
-      "content-type": "text/yaml; charset=utf-8",
+      "content-type": rendered.contentType,
       "cache-control": "no-store",
+      "vary": "User-Agent, Accept",
+      "access-control-allow-origin": "*",
       "x-content-type-options": "nosniff"
     }
   });
@@ -184,7 +206,7 @@ export default {
     if (request.method === "GET" && url.pathname.startsWith("/sub/")) {
       const token = url.pathname.slice("/sub/".length);
       const profile = profiles.find((item) => item.publicToken === token);
-      if (profile) return servePublished(env, profile);
+      if (profile) return servePublished(env, profile, request);
     }
     return new Response("Not found", { status: 404 });
   },
