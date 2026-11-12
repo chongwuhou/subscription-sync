@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS refresh_audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  subscription_id TEXT NOT NULL,
   created_at TEXT NOT NULL,
   action TEXT NOT NULL,
   reason TEXT NOT NULL,
