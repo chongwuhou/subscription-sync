@@ -313,6 +313,12 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(expiredText, /请联系顾问/);
   assert.match(expiredText, /请改用新地址/);
 
+  const expiredV2Response = await worker.fetch(new Request("https://worker.example.com/sub/old-aggregate-token-123456", {
+    headers: { "user-agent": "v2rayNG/1.10.0" }
+  }), env);
+  assert.equal(expiredV2Response.status, 200);
+  assert.match(atob((await expiredV2Response.text()).trim()), /vmess:\/\//);
+
   const normalAggregateResponse = await worker.fetch(new Request("https://worker.example.com/sub/new-aggregate-token-123456"), env);
   assert.equal(normalAggregateResponse.status, 200);
   assert.match(await normalAggregateResponse.text(), /US \| One/);

@@ -43,9 +43,13 @@ export function normalizeExpiredSubscription(value) {
 export function buildExpiredDisplayNodes(value) {
   return normalizeExpiredNodeNames(value).map((name, index) => ({
     name,
-    type: "http",
+    type: "vmess",
     server: "127.0.0.1",
-    port: index + 1
+    port: index + 1,
+    uuid: `00000000-0000-0000-0000-00000000000${index + 1}`,
+    alterId: 0,
+    cipher: "auto",
+    network: "tcp"
   }));
 }
 
