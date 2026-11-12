@@ -18,8 +18,10 @@ id = "replace-with-an-approved-kv-namespace-id"
 # last good version from KV.
 crons = ["*/5 * * * *"]
 
-# Optional: enable this binding when an audit history is desired. The SQL
-# migration stores no source URL, Token, or generated subscription body.
+# Optional: enable this binding for refresh audit history and source snapshots.
+# Apply migrations/0001_audit.sql and migrations/0002_source_snapshots.sql.
+# Snapshots store normalized valid node JSON for offline rule reprocessing;
+# they do not store source URLs or Tokens, but may contain node credentials.
 # [[d1_databases]]
 # binding = "SUBSCRIPTION_AUDIT"
 # database_name = "subscription-sync-audit"
