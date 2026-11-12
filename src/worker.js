@@ -259,7 +259,7 @@ const ADMIN_HTML = `<!doctype html>
               body: JSON.stringify({ id: profile.id, content })
             });
             await load();
-            setStatus("已上传并绑定订阅 " + profile.id + " 的历史有效源，共 " + data.validCount + " 个节点；源站不可用时会自动使用。");
+            setStatus("已上传并绑定订阅 " + profile.id + " 的历史有效源，共 " + data.validCount + " 个节点（" + (data.storage === "d1" ? "D1" : "KV 兜底") + "）；源站不可用时会自动使用。");
           } catch (error) { setStatus(error.message); }
           finally { uploadButton.disabled = false; }
         };
@@ -267,7 +267,7 @@ const ADMIN_HTML = `<!doctype html>
         if (profile.capturedAt) {
           const historyNote = document.createElement("p");
           historyNote.className = "muted";
-          historyNote.textContent = "已绑定历史源：" + (profile.validCount || 0) + " 个有效节点，保存于 " + new Date(profile.capturedAt).toLocaleString();
+          historyNote.textContent = "已绑定历史源（" + (profile.sourceStorage === "d1" ? "D1" : "KV 兜底") + "）：" + (profile.validCount || 0) + " 个有效节点，保存于 " + new Date(profile.capturedAt).toLocaleString();
           card.appendChild(historyNote);
         }
         const publicLinkInput = addField(card, "publicLink", "修改后的通用订阅地址（可修改 /sub/ 后面的路径）", publicLinkFor(profile.publicToken), "url", location.origin + "/sub/保存后自动生成");
@@ -630,10 +630,20 @@ async function handleAdminApi(request, env, url) {
     const current = await storedProfiles(env);
     const settings = await loadSettings(env);
     const aggregatePublicToken = await ensureAggregateToken(env);
-    const subscriptions = await Promise.all(current.profiles.map(async (profile) => ({
-      ...profile,
-      ...(await loadLatestSourceSnapshotMeta(env, profile.id) ?? {})
-    })));
+    const subscriptions = await Promise.all(current.profiles.map(async (profile) => {
+      const d1Meta = await loadLatestSourceSnapshotMeta(env, profile.id);
+      if (d1Meta) return { ...profile, ...d1Meta, sourceStorage: "d1" };
+      const state = await loadState(env, profile.id);
+      if (state?.sourceSnapshotAt || state?.sourceNodes?.length || state?.nodes?.length) {
+        return {
+          ...profile,
+          capturedAt: state.sourceSnapshotAt ?? state.updatedAt ?? "",
+          validCount: Number(state.validCount ?? state.nodes?.length ?? 0),
+          sourceStorage: "kv"
+        };
+      }
+      return profile;
+    }));
     return json({
       managed: current.managed,
       subscriptions,
@@ -689,11 +699,12 @@ async function handleAdminApi(request, env, url) {
         return json({ error: "uploaded-source-has-no-valid-nodes", validCount: candidate.validCount }, 400);
       }
       const capturedAt = new Date();
-      if (!await writeSourceSnapshot(env, profile.id, candidate, capturedAt)) {
-        return json({ error: "source-snapshot-store-not-configured" }, 503);
-      }
+      const storedInD1 = await writeSourceSnapshot(env, profile.id, candidate, capturedAt);
       const previous = await loadState(env, profile.id);
-      const decision = await publishDecision(env, profile.id, decidePublication(candidate, previous), capturedAt);
+      const decision = await publishDecision(env, profile.id, decidePublication(candidate, previous), capturedAt, {
+        sourceOrigin: "manual-upload",
+        sourceSnapshotAt: capturedAt.toISOString()
+      });
       const profiles = await loadProfiles(env);
       const aggregate = await refreshAggregate(env, capturedAt, profiles, settings);
       return json({
@@ -701,6 +712,7 @@ async function handleAdminApi(request, env, url) {
         subscriptionId: profile.id,
         action: decision.action,
         validCount: candidate.validCount,
+        storage: storedInD1 ? "d1" : "kv-fallback",
         aggregateAction: aggregate.action
       });
     } catch (error) {
@@ -741,8 +753,14 @@ async function handleAdminApi(request, env, url) {
         if (preview.original.length === 0 || preview.modified.length === 0) throw new Error("latest-source-has-no-valid-nodes");
       } catch (liveError) {
         const historicalNodes = await loadLatestSourceSnapshot(env, profile.id);
-        if (!historicalNodes?.length) throw liveError;
-        preview = buildPreviewFromNodes(historicalNodes, { renameRules, replaceAllFields });
+        const state = await loadState(env, profile.id);
+        const fallbackNodes = historicalNodes?.length
+          ? historicalNodes
+          : Array.isArray(state?.sourceNodes) && state.sourceNodes.length > 0
+            ? state.sourceNodes
+            : state?.nodes;
+        if (!fallbackNodes?.length) throw liveError;
+        preview = buildPreviewFromNodes(fallbackNodes, { renameRules, replaceAllFields });
         if (preview.original.length === 0 || preview.modified.length === 0) throw liveError;
         source = "history";
       }
@@ -775,13 +793,15 @@ async function saveState(env, profileId, state) {
   await env.SUBSCRIPTION_STATE.put(stateKey(profileId), JSON.stringify(state));
 }
 
-async function publishDecision(env, profileId, decision, now) {
+async function publishDecision(env, profileId, decision, now, metadata = {}) {
   if (decision.action === "keep") return decision;
   await saveState(env, profileId, {
     version: 1,
     subscriptionId: profileId,
     contentHash: decision.contentHash,
     sourceContentHash: decision.sourceContentHash,
+    sourceOrigin: metadata.sourceOrigin ?? "source-url",
+    sourceSnapshotAt: metadata.sourceSnapshotAt ?? now.toISOString(),
     validCount: decision.validCount,
     updatedAt: now.toISOString(),
     sourceNodes: decision.sourceNodes ?? decision.nodes,
@@ -896,7 +916,10 @@ async function reprocessStoredProfile(env, profile, now, settings, previous = nu
     });
     if (!candidate.valid) return { action: "keep", reason: "historical-nodes-below-minimum", validCount: candidate.validCount };
     await writeSourceSnapshot(env, profile.id, candidate, now);
-    const decision = await publishDecision(env, profile.id, decidePublication(candidate, state), now);
+    const decision = await publishDecision(env, profile.id, decidePublication(candidate, state), now, {
+      sourceOrigin: "historical-fallback",
+      sourceSnapshotAt: state?.sourceSnapshotAt ?? now.toISOString()
+    });
     if (decision.action === "keep") {
       return { ...decision, reason: fallbackReason, validCount: candidate.validCount };
     }
