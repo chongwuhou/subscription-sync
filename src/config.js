@@ -18,6 +18,37 @@ function normalizeNodeNameFilter(value) {
   return String(value ?? "").trim();
 }
 
+export const DEFAULT_EXPIRED_NODE_NAMES = ["订阅已过期", "请联系顾问", "续费后恢复"];
+
+export function normalizeExpiredNodeNames(value) {
+  const names = Array.isArray(value) ? value : [];
+  return DEFAULT_EXPIRED_NODE_NAMES.map((fallback, index) => String(names[index] ?? fallback).trim() || fallback);
+}
+
+export function normalizeExpiredTokens(value) {
+  const tokens = Array.isArray(value) ? value : [];
+  return [...new Set(tokens
+    .map((item) => String(item ?? "").trim())
+    .filter((item) => /^[A-Za-z0-9_-]{1,128}$/.test(item)))];
+}
+
+export function normalizeExpiredSubscription(value) {
+  const item = value && typeof value === "object" ? value : {};
+  return {
+    tokens: normalizeExpiredTokens(item.tokens),
+    nodeNames: normalizeExpiredNodeNames(item.nodeNames)
+  };
+}
+
+export function buildExpiredDisplayNodes(value) {
+  return normalizeExpiredNodeNames(value).map((name, index) => ({
+    name,
+    type: "http",
+    server: "127.0.0.1",
+    port: index + 1
+  }));
+}
+
 function normalizeProfile(item, index) {
   if (!item || typeof item !== "object") return null;
   const id = String(item.id ?? `subscription-${index + 1}`).trim();

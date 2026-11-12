@@ -1,5 +1,7 @@
 import { buildAggregateCandidate, buildCandidate, buildCandidateFromNodes, buildPreview, buildPreviewFromNodes, decidePublication } from "./core.js";
 import {
+  buildExpiredDisplayNodes,
+  normalizeExpiredSubscription,
   parseSubscriptionProfiles,
   parseSubscriptionProfilesJson,
   stateKey,
@@ -11,6 +13,7 @@ import { normalizeClashConfig } from "./clash.js";
 const DEFAULT_MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const ADMIN_CONFIG_KEY = "subscription-config-v1";
 const ADMIN_SETTINGS_KEY = "subscription-settings-v1";
+const ADMIN_EXPIRED_KEY = "subscription-expired-v1";
 const AGGREGATE_PUBLIC_TOKEN_KEY = "subscription-aggregate-config-v1";
 const AGGREGATE_STATE_ID = "__all__";
 const LAST_REFRESH_KEY = "subscription-refresh-meta-v1";
@@ -74,6 +77,7 @@ const ADMIN_HTML = `<!doctype html>
       token: "",
       profiles: [],
       aggregatePublicToken: "",
+      expiredSubscription: { tokens: [], nodeNames: ["订阅已过期", "请联系顾问", "续费后恢复"] },
       refreshIntervalMinutes: 30,
       clashConfig: {
         "proxy-groups": [{ name: "PROXY", type: "select", proxies: ["DIRECT", "{{NODES}}"] }],
@@ -258,6 +262,35 @@ const ADMIN_HTML = `<!doctype html>
       note.textContent = "汇总地址会合并所有源头订阅的已发布有效节点；某个源头失效时保留它上一次的有效版本。修改 /sub/ 后面的路径后点击保存即可。";
       card.appendChild(note);
       aggregateRoot.appendChild(card);
+
+      const expiredCard = document.createElement("fieldset");
+      const expiredLegend = document.createElement("legend");
+      expiredLegend.textContent = "已过期的旧汇总地址";
+      expiredCard.appendChild(expiredLegend);
+      const expiredLinks = addField(
+        expiredCard,
+        "expiredLinks",
+        "旧汇总订阅地址（每行一个；这些地址只显示过期提示节点）",
+        (state.expiredSubscription.tokens || []).map(publicLinkFor).join("\\n"),
+        "textarea",
+        "把旧的汇总地址粘贴到这里"
+      );
+      const expiredNames = Array.isArray(state.expiredSubscription.nodeNames)
+        ? state.expiredSubscription.nodeNames
+        : ["订阅已过期", "请联系顾问", "续费后恢复"];
+      [0, 1, 2].forEach((index) => addField(
+        expiredCard,
+        "expiredName" + index,
+        "过期提示节点 " + (index + 1) + " 名称",
+        expiredNames[index] || ["订阅已过期", "请联系顾问", "续费后恢复"][index],
+        "text",
+        ["例如：订阅已过期", "例如：请联系顾问", "例如：续费后恢复"][index]
+      ));
+      const expiredNote = document.createElement("p");
+      expiredNote.className = "muted";
+      expiredNote.textContent = "操作顺序：先把上面的汇总地址改成新地址，再把旧地址粘贴到这里，最后点击保存。旧地址会继续有效，但只返回这 3 个提示名称；新地址返回正常节点。";
+      expiredCard.appendChild(expiredNote);
+      aggregateRoot.appendChild(expiredCard);
     }
     function parseClashConfigInput(value) {
       let parsed;
@@ -443,6 +476,7 @@ const ADMIN_HTML = `<!doctype html>
         const data = await api("/api/admin/subscriptions");
         state.profiles = data.subscriptions || [];
         state.aggregatePublicToken = data.aggregatePublicToken || "";
+        state.expiredSubscription = data.expiredSubscription || { tokens: [], nodeNames: ["订阅已过期", "请联系顾问", "续费后恢复"] };
         state.refreshIntervalMinutes = data.refreshIntervalMinutes || 30;
         state.clashConfig = data.clashConfig || state.clashConfig;
         interval.value = state.refreshIntervalMinutes;
@@ -469,8 +503,12 @@ const ADMIN_HTML = `<!doctype html>
         const clashConfig = parseClashConfigInput(clashSettingsRoot.querySelector("[data-field='clashConfig']").value);
         const aggregateLink = aggregateRoot.querySelector("[data-field='aggregateLink']");
         const aggregatePublicToken = aggregateLink ? publicTokenFromLink(aggregateLink.value, 0) : "";
+        const expiredLinks = aggregateRoot.querySelector("[data-field='expiredLinks']")?.value || "";
+        const expiredTokens = expiredLinks.split(/\\r?\\n/).map((item) => item.trim()).filter(Boolean).map((item, index) => publicTokenFromLink(item, index));
+        const expiredNodeNames = [0, 1, 2].map((index) => aggregateRoot.querySelector("[data-field='expiredName" + index + "']")?.value.trim() || "");
+        if (expiredNodeNames.some((name) => !name)) throw new Error("过期提示节点名称不能留空");
         if (subscriptions.length === 0) throw new Error("当前没有订阅配置，请先点击“新增订阅”并填写完整后再保存");
-        await api("/api/admin/subscriptions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscriptions, aggregatePublicToken }) });
+        await api("/api/admin/subscriptions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscriptions, aggregatePublicToken, expiredSubscription: { tokens: expiredTokens, nodeNames: expiredNodeNames } }) });
         await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value), clashConfig }) });
         const scope = focusIndex ? "第 " + focusIndex + " 个订阅" : subscriptions.length + " 个订阅";
         await load();
@@ -622,6 +660,24 @@ async function ensureAggregateToken(env, requested = "") {
   return generated;
 }
 
+async function loadExpiredSubscription(env) {
+  if (env.SUBSCRIPTION_STATE?.get) {
+    const stored = await env.SUBSCRIPTION_STATE.get(ADMIN_EXPIRED_KEY);
+    if (stored !== null) {
+      try { return normalizeExpiredSubscription(JSON.parse(stored)); } catch { /* use defaults */ }
+    }
+  }
+  return normalizeExpiredSubscription(null);
+}
+
+async function saveExpiredSubscription(env, value) {
+  const normalized = normalizeExpiredSubscription(value);
+  if (env.SUBSCRIPTION_STATE?.put) {
+    await env.SUBSCRIPTION_STATE.put(ADMIN_EXPIRED_KEY, JSON.stringify(normalized));
+  }
+  return normalized;
+}
+
 async function loadSettings(env) {
   if (env.SUBSCRIPTION_STATE?.get) {
     const stored = await env.SUBSCRIPTION_STATE.get(ADMIN_SETTINGS_KEY);
@@ -707,6 +763,7 @@ async function handleAdminApi(request, env, url) {
   if (url.pathname === "/api/admin/subscriptions" && request.method === "GET") {
     const current = await storedProfiles(env);
     const settings = await loadSettings(env);
+    const expiredSubscription = await loadExpiredSubscription(env);
     const aggregatePublicToken = await ensureAggregateToken(env);
     const subscriptions = await Promise.all(current.profiles.map(async (profile) => {
       const d1Meta = await loadLatestSourceSnapshotMeta(env, profile.id);
@@ -726,6 +783,7 @@ async function handleAdminApi(request, env, url) {
       managed: current.managed,
       subscriptions,
       aggregatePublicToken,
+      expiredSubscription,
       refreshIntervalMinutes: settings.refreshIntervalMinutes,
       clashConfig: settings.clashConfig
     });
@@ -747,10 +805,21 @@ async function handleAdminApi(request, env, url) {
       });
       const checked = validateSubscriptionProfiles(prepared);
       if (checked.error) return json({ error: checked.error }, 400);
+      const requestedAggregateToken = String(body?.aggregatePublicToken ?? "").trim();
+      const aggregateCandidate = requestedAggregateToken && /^[A-Za-z0-9_-]{1,128}$/.test(requestedAggregateToken)
+        ? requestedAggregateToken
+        : await loadAggregateToken(env);
+      const expiredSubscriptionInput = Object.prototype.hasOwnProperty.call(body ?? {}, "expiredSubscription")
+        ? normalizeExpiredSubscription(body.expiredSubscription)
+        : await loadExpiredSubscription(env);
+      if (aggregateCandidate && expiredSubscriptionInput.tokens.includes(aggregateCandidate)) {
+        return json({ error: "current aggregate address cannot also be marked expired" }, 400);
+      }
+      const aggregatePublicToken = await ensureAggregateToken(env, requestedAggregateToken);
       await env.SUBSCRIPTION_STATE.put(ADMIN_CONFIG_KEY, JSON.stringify(checked.profiles));
-      await ensureAggregateToken(env, body?.aggregatePublicToken);
+      const expiredSubscription = await saveExpiredSubscription(env, expiredSubscriptionInput);
       await reprocessConfiguredProfiles(env, checked.profiles);
-      return json({ ok: true, count: checked.profiles.length });
+      return json({ ok: true, count: checked.profiles.length, expiredSubscription });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "invalid-json" }, 400);
     }
@@ -868,6 +937,7 @@ async function handleAdminApi(request, env, url) {
   if (url.pathname === "/api/admin/subscriptions/reset" && request.method === "POST") {
     if (!env.SUBSCRIPTION_STATE.delete) return json({ error: "state-store-does-not-support-delete" }, 503);
     await env.SUBSCRIPTION_STATE.delete(ADMIN_CONFIG_KEY);
+    await env.SUBSCRIPTION_STATE.delete(ADMIN_EXPIRED_KEY);
     await env.SUBSCRIPTION_STATE.delete(AGGREGATE_PUBLIC_TOKEN_KEY);
     await env.SUBSCRIPTION_STATE.delete(stateKey(AGGREGATE_STATE_ID));
     return json({ ok: true, managed: false });
@@ -1143,6 +1213,36 @@ export async function refresh(env, now = new Date()) {
   return (await refreshAll(env, now))[0];
 }
 
+function responseFromRendered(rendered) {
+  const responseBody = rendered.contentType.startsWith("text/yaml") && !String(rendered.body).startsWith("\uFEFF")
+    ? `\uFEFF${rendered.body}`
+    : rendered.body;
+  return new Response(responseBody, {
+    status: 200,
+    headers: {
+      "content-type": rendered.contentType,
+      "cache-control": "no-store",
+      "vary": "User-Agent, Accept",
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff"
+    }
+  });
+}
+
+async function serveExpiredSubscription(env, expiredSubscription, request) {
+  const target = detectTarget(request, "clash");
+  if (!target || !supportedTargets.includes(target)) {
+    return json({ error: "unsupported-target", supportedTargets }, 406);
+  }
+  try {
+    const settings = await loadSettings(env);
+    const rendered = renderSubscription(buildExpiredDisplayNodes(expiredSubscription.nodeNames), target, settings.clashConfig);
+    return responseFromRendered(rendered);
+  } catch {
+    return new Response("Expired subscription output is unavailable", { status: 503 });
+  }
+}
+
 async function servePublishedState(env, stateId, defaultTarget, request) {
   const state = await loadState(env, stateId);
   if (!state?.output) return new Response("No valid subscription has been published yet", { status: 503 });
@@ -1165,19 +1265,7 @@ async function servePublishedState(env, stateId, defaultTarget, request) {
     rendered = null;
   }
   if (!rendered) return new Response("This target is unavailable until the next valid refresh", { status: 503 });
-  const responseBody = rendered.contentType.startsWith("text/yaml") && !String(rendered.body).startsWith("\uFEFF")
-    ? `\uFEFF${rendered.body}`
-    : rendered.body;
-  return new Response(responseBody, {
-    status: 200,
-    headers: {
-      "content-type": rendered.contentType,
-      "cache-control": "no-store",
-      "vary": "User-Agent, Accept",
-      "access-control-allow-origin": "*",
-      "x-content-type-options": "nosniff"
-    }
-  });
+  return responseFromRendered(rendered);
 }
 
 async function servePublished(env, profile, request) {
@@ -1204,6 +1292,10 @@ export default {
       const aggregateToken = await loadAggregateToken(env);
       if (token && aggregateToken && token === aggregateToken) {
         return servePublishedState(env, AGGREGATE_STATE_ID, "clash", request);
+      }
+      const expiredSubscription = await loadExpiredSubscription(env);
+      if (token && expiredSubscription.tokens.includes(token)) {
+        return serveExpiredSubscription(env, expiredSubscription, request);
       }
     }
     return new Response("Not found", { status: 404 });

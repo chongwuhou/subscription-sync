@@ -228,6 +228,8 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(pageText, /Clash \/ Mihomo 分流配置/);
   assert.match(pageText, /Rule Providers|rule-providers/);
   assert.match(pageText, /上传并保存历史源/);
+  assert.match(pageText, /已过期的旧汇总地址/);
+  assert.match(pageText, /expiredName/);
   assert.doesNotMatch(pageText, /固定链接路径 Token/);
 
   const unauthorized = await worker.fetch(new Request("https://worker.example.com/api/admin/subscriptions"), env);
@@ -248,7 +250,12 @@ test("admin API manages subscriptions and refresh interval without public access
         nodeNameExclude: "到期|续费",
         minValidNodes: 1,
         defaultTarget: "base64"
-      }]
+      }],
+      aggregatePublicToken: "new-aggregate-token-123456",
+      expiredSubscription: {
+        tokens: ["old-aggregate-token-123456"],
+        nodeNames: ["已到期", "请联系顾问", "请改用新地址"]
+      }
     })
   }), env);
   assert.equal(update.status, 200);
@@ -281,6 +288,10 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.equal(body.refreshIntervalMinutes, 15);
   assert.equal(body.clashConfig.rules[0], "RULE-SET,ads,REJECT");
   assert.equal(body.clashConfig["rule-providers"].ads.type, "http");
+  assert.deepEqual(body.expiredSubscription, {
+    tokens: ["old-aggregate-token-123456"],
+    nodeNames: ["已到期", "请联系顾问", "请改用新地址"]
+  });
 
   const importResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/import", {
     method: "POST",
@@ -293,6 +304,18 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.equal(audit.snapshots.length, 1);
   const importedState = JSON.parse(await state.get("published-state-v1:工作一"));
   assert.match(importedState.output, /rule-providers/);
+
+  const expiredResponse = await worker.fetch(new Request("https://worker.example.com/sub/old-aggregate-token-123456"), env);
+  assert.equal(expiredResponse.status, 200);
+  const expiredBytes = new Uint8Array(await expiredResponse.arrayBuffer());
+  const expiredText = new TextDecoder().decode(expiredBytes);
+  assert.match(expiredText, /已到期/);
+  assert.match(expiredText, /请联系顾问/);
+  assert.match(expiredText, /请改用新地址/);
+
+  const normalAggregateResponse = await worker.fetch(new Request("https://worker.example.com/sub/new-aggregate-token-123456"), env);
+  assert.equal(normalAggregateResponse.status, 200);
+  assert.match(await normalAggregateResponse.text(), /US \| One/);
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => { throw new Error("source window closed"); };
