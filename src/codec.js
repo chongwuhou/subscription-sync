@@ -1,3 +1,5 @@
+import { expandProxyGroups, normalizeClashConfig } from "./clash.js";
+
 const SUPPORTED_TYPES = new Set([
   "ss",
   "ssr",
@@ -494,19 +496,17 @@ function renderYaml(value, indent = 0) {
   return `${padding}${yamlScalar(value)}`;
 }
 
-export function renderClashYaml(nodes) {
+export function renderClashYaml(nodes, clashConfig) {
   const names = nodes.map((node) => node.name);
+  const normalized = normalizeClashConfig(clashConfig);
   const config = {
     proxies: nodes,
-    "proxy-groups": [
-      {
-        name: "PROXY",
-        type: "select",
-        proxies: ["DIRECT", ...names]
-      }
-    ],
-    rules: ["MATCH,PROXY"]
+    "proxy-groups": expandProxyGroups(normalized, names),
+    rules: normalized.rules
   };
+  if (Object.keys(normalized["rule-providers"]).length > 0) {
+    config["rule-providers"] = normalized["rule-providers"];
+  }
   return `${renderYaml(config)}\n`;
 }
 
