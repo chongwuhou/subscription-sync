@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { refresh, refreshAll } from "../src/worker.js";
+import worker, { refresh, refreshAll } from "../src/worker.js";
 
 class MemoryKV {
   constructor() {
@@ -116,6 +116,13 @@ test("multiple subscriptions have isolated state", async () => {
     assert.deepEqual(results.map((item) => item.action), ["initialize", "initialize"]);
     assert.match(await state.get("published-state-v1:main"), /subscriptionId/);
     assert.match(await state.get("published-state-v1:backup"), /backup.example.com/);
+
+    const mainResponse = await worker.fetch(new Request("https://worker.example.com/sub/main-token"), env);
+    const backupResponse = await worker.fetch(new Request("https://worker.example.com/sub/backup-token"), env);
+    assert.equal(mainResponse.status, 200);
+    assert.equal(backupResponse.status, 200);
+    assert.match(await mainResponse.text(), /one.example.com/);
+    assert.match(await backupResponse.text(), /backup.example.com/);
   } finally {
     globalThis.fetch = originalFetch;
   }
