@@ -83,6 +83,18 @@ npm run check
 
 管理员后台地址为 `/admin`。输入 `ADMIN_TOKEN` 后可维护源头订阅地址、改名规则、多订阅 Token、最低有效节点数、默认输出格式和自动刷新间隔；令牌只在当前页面内存中使用，不写入浏览器存储。
 
+改名规则可以直接复制下面的案例到后台的“改名规则 JSON”框：
+
+```json
+[
+  {"pattern":"\\s*\\|\\s*","replacement":"-"}
+]
+```
+
+上例会把 `US | New York` 改成 `US-New York`。也可以按顺序组合规则，例如：
+`[{"pattern":"香港","replacement":"HK"},{"pattern":"新加坡","replacement":"SG"}]`。
+保存后配置写入 Cloudflare KV，重新打开后台仍会保留；6 小时和 24 小时分别填写 `360` 和 `1440` 分钟。
+
 `wrangler.toml.example` 是不绑定账号资源的公开模板；生产 `wrangler.toml` 只记录资源 ID，真实地址、Token 和规则仍放在 Cloudflare 私有配置中。
 
 ## 后续接入前的验收标准
