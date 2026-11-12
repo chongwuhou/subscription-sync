@@ -85,13 +85,13 @@ const ADMIN_HTML = `<!doctype html>
       }
       state.profiles.forEach((profile, index) => {
         const card = document.createElement("fieldset");
+        card.dataset.publicToken = profile.publicToken || "";
         const legend = document.createElement("legend");
         legend.textContent = "订阅 " + (index + 1);
         card.appendChild(legend);
         addField(card, "id", "ID", profile.id, "text", "例如：main 或 backup");
         addField(card, "name", "名称", profile.name, "text", "例如：主订阅");
-        addField(card, "sourceUrl", "源头订阅地址（仅管理员可见）", profile.sourceUrl, "url", "https://供应商.example/subscribe?token=...");
-        addField(card, "publicToken", "固定链接路径 Token", profile.publicToken, "text", "例如：main-random-token");
+        addField(card, "sourceUrl", "完整源头订阅地址（把 ?token=... 一起粘贴，仅管理员可见）", profile.sourceUrl, "url", "https://供应商.example/subscribe?token=...");
         addField(card, "minValidNodes", "最低有效节点数", profile.minValidNodes || 1, "number");
         addField(card, "defaultTarget", "无法识别客户端时的格式（clash/base64/sing-box/links）", profile.defaultTarget || "clash", "text", "clash");
         addField(card, "renameRules", "改名规则 JSON", JSON.stringify(profile.renameRules || [], null, 2), "textarea", '[{"pattern":"\\\\s*\\\\|\\\\s*","replacement":"-"}]');
@@ -130,9 +130,8 @@ const ADMIN_HTML = `<!doctype html>
         const id = value("id").trim();
         const name = value("name").trim();
         const sourceUrl = value("sourceUrl").trim();
-        const publicToken = value("publicToken").trim();
-        if (!id || !name || !sourceUrl || !publicToken) {
-          throw new Error("订阅 " + (index + 1) + " 还没有填写完整：ID、名称、源头订阅地址和固定链接 Token 都必填");
+        if (!id || !name || !sourceUrl) {
+          throw new Error("订阅 " + (index + 1) + " 还没有填写完整：ID、名称和完整源头订阅地址都必填");
         }
         if (!/^https?:\\/\\//i.test(sourceUrl)) {
           throw new Error("订阅 " + (index + 1) + " 的源头订阅地址必须以 https:// 或 http:// 开头");
@@ -144,7 +143,7 @@ const ADMIN_HTML = `<!doctype html>
           id,
           name,
           sourceUrl,
-          publicToken,
+          publicToken: card.dataset.publicToken || "",
           minValidNodes: Number(value("minValidNodes")),
           defaultTarget: value("defaultTarget").trim(),
           renameRules
@@ -181,6 +180,7 @@ const ADMIN_HTML = `<!doctype html>
         await api("/api/admin/subscriptions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscriptions }) });
         await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value) }) });
         const scope = focusIndex ? "第 " + focusIndex + " 个订阅" : subscriptions.length + " 个订阅";
+        await load();
         setStatus("已保存" + scope + "及刷新间隔到 Cloudflare KV。刷新页面后仍会保留；下一次 Cron 刷新或点击“立即刷新”后生效。");
       } catch (error) { setStatus(error.message); }
     }
@@ -284,6 +284,16 @@ function normalizeRefreshInterval(value, fallback = DEFAULT_REFRESH_INTERVAL_MIN
   return number;
 }
 
+function createPublicToken() {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return uuid.replace(/-/g, "");
+  const bytes = new Uint8Array(18);
+  globalThis.crypto.getRandomValues(bytes);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
 async function loadSettings(env) {
   if (env.SUBSCRIPTION_STATE?.get) {
     const stored = await env.SUBSCRIPTION_STATE.get(ADMIN_SETTINGS_KEY);
@@ -352,7 +362,19 @@ async function handleAdminApi(request, env, url) {
   if (url.pathname === "/api/admin/subscriptions" && request.method === "PUT") {
     try {
       const body = await readJsonBody(request);
-      const checked = validateSubscriptionProfiles(body?.subscriptions ?? body);
+      const rawSubscriptions = body?.subscriptions ?? body;
+      if (!Array.isArray(rawSubscriptions)) return json({ error: "subscriptions must be an array" }, 400);
+      const current = await storedProfiles(env);
+      const existingTokens = new Map(current.profiles.map((profile) => [profile.id, profile.publicToken]));
+      const prepared = rawSubscriptions.map((item) => {
+        const profile = item && typeof item === "object" ? item : {};
+        const id = String(profile.id ?? "").trim();
+        return {
+          ...profile,
+          publicToken: String(profile.publicToken ?? existingTokens.get(id) ?? "").trim() || createPublicToken()
+        };
+      });
+      const checked = validateSubscriptionProfiles(prepared);
       if (checked.error) return json({ error: checked.error }, 400);
       await env.SUBSCRIPTION_STATE.put(ADMIN_CONFIG_KEY, JSON.stringify(checked.profiles));
       return json({ ok: true, count: checked.profiles.length });
