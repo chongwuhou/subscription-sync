@@ -32,6 +32,7 @@ function normalizeProfile(item, index) {
     sourceUrl,
     publicToken,
     renameRules: Array.isArray(item.renameRules) ? item.renameRules : [],
+    replaceAllFields: item.replaceAllFields === true,
     minValidNodes: normalizeMinValidNodes(item.minValidNodes ?? 1),
     defaultTarget: String(item.defaultTarget ?? "clash").trim() || "clash"
   };
@@ -87,6 +88,7 @@ export function parseSubscriptionProfiles(env) {
     sourceUrl: env.SOURCE_URL,
     publicToken: env.PUBLIC_PATH_TOKEN,
     renameRules: parseRenameRules(env.RENAME_RULES_JSON),
+    replaceAllFields: String(env.REPLACE_ALL_FIELDS ?? "").toLowerCase() === "true",
     minValidNodes: normalizeMinValidNodes(env.MIN_VALID_NODES ?? 1),
     defaultTarget: String(env.DEFAULT_TARGET ?? "clash").trim() || "clash"
   }];
