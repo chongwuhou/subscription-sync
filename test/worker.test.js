@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { refresh } from "../src/worker.js";
+import { refresh, refreshAll } from "../src/worker.js";
 
 class MemoryKV {
   constructor() {
@@ -55,6 +55,7 @@ test("Worker refresh publishes only changed valid content", async () => {
   const audit = new MemoryD1();
   const env = {
     SOURCE_URL: "https://source.example.com/subscription",
+    PUBLIC_PATH_TOKEN: "test-token",
     SUBSCRIPTION_STATE: state,
     SUBSCRIPTION_AUDIT: audit,
     RENAME_RULES_JSON: JSON.stringify([{ pattern: "\\s*\\|\\s*", replacement: "-" }])
@@ -74,12 +75,47 @@ test("Worker refresh publishes only changed valid content", async () => {
     assert.equal(invalid.action, "keep");
     assert.equal(invalid.reason, "no-valid-nodes");
 
-    const published = JSON.parse(await state.get("published-state-v1"));
+    const published = JSON.parse(await state.get("published-state-v1:default"));
     assert.equal(published.validCount, 1);
     assert.match(published.output, /US-One/);
     assert.equal(audit.rows.length, 3);
-    assert.equal(audit.rows[0][0], "2026-11-12T00:00:00.000Z");
-    assert.equal(audit.rows[2][1], "keep");
+    assert.equal(audit.rows[0][0], "default");
+    assert.equal(audit.rows[0][1], "2026-11-12T00:00:00.000Z");
+    assert.equal(audit.rows[2][2], "keep");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("multiple subscriptions have isolated state", async () => {
+  const originalFetch = globalThis.fetch;
+  const state = new MemoryKV();
+  const env = {
+    SUBSCRIPTIONS_JSON: JSON.stringify([
+      {
+        id: "main",
+        sourceUrl: "https://source.example.com/main",
+        publicToken: "main-token",
+        renameRules: [{ pattern: "\\s*\\|\\s*", replacement: "-" }]
+      },
+      {
+        id: "backup",
+        sourceUrl: "https://source.example.com/backup",
+        publicToken: "backup-token"
+      }
+    ]),
+    SUBSCRIPTION_STATE: state
+  };
+  globalThis.fetch = async (request) => {
+    const url = typeof request === "string" ? request : request.url;
+    const body = url.endsWith("/main") ? validSource : validSource.replace("one.example.com", "backup.example.com");
+    return new Response(body, { status: 200 });
+  };
+  try {
+    const results = await refreshAll(env, new Date("2026-11-12T01:00:00.000Z"));
+    assert.deepEqual(results.map((item) => item.action), ["initialize", "initialize"]);
+    assert.match(await state.get("published-state-v1:main"), /subscriptionId/);
+    assert.match(await state.get("published-state-v1:backup"), /backup.example.com/);
   } finally {
     globalThis.fetch = originalFetch;
   }
