@@ -39,12 +39,13 @@ function sortNodes(nodes) {
 
 export function buildPreview(rawText, options = {}) {
   const renameRules = Array.isArray(options.renameRules) ? options.renameRules : [];
+  const replaceAllFields = options.replaceAllFields === true;
   const parsed = decodeSubscription(rawText);
   const original = new Map();
   const modified = new Map();
   for (const item of parsed) {
     const originalNode = normalizeNode(item, []);
-    const modifiedNode = normalizeNode(item, renameRules);
+    const modifiedNode = normalizeNode(item, renameRules, { replaceAllFields });
     if (!isValidNode(originalNode) || !isValidNode(modifiedNode)) continue;
     const identity = identityWithoutName(originalNode);
     original.set(identity, originalNode);
@@ -90,7 +91,7 @@ export async function buildCandidate(rawText, options = {}) {
   const parsed = decodeSubscription(rawText);
   const deduped = new Map();
   for (const item of parsed) {
-    const node = normalizeNode(item, renameRules);
+    const node = normalizeNode(item, renameRules, { replaceAllFields: options.replaceAllFields === true });
     if (!isValidNode(node)) continue;
     deduped.set(identityWithoutName(node), node);
   }
