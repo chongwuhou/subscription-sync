@@ -1,0 +1,19 @@
+name = "subscription-sync"
+main = "src/worker.js"
+compatibility_date = "2026-01-01"
+
+[[kv_namespaces]]
+binding = "SUBSCRIPTION_STATE"
+id = "769fdb2d68f1467695222b6b7bf97bb3"
+
+[[d1_databases]]
+binding = "SUBSCRIPTION_AUDIT"
+database_name = "subscription-sync-audit"
+database_id = "8b43471d-e0e2-4c29-87d5-90915cf6d52c"
+migrations_dir = "migrations"
+
+[triggers]
+crons = ["*/30 * * * *"]
+
+[vars]
+# Keep source URLs, public tokens and rename rules out of this file.
