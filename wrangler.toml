@@ -1,6 +1,8 @@
 name = "subscription-sync"
 main = "src/worker.js"
 compatibility_date = "2026-01-01"
+workers_dev = true
+preview_urls = false
 
 [[kv_namespaces]]
 binding = "SUBSCRIPTION_STATE"
