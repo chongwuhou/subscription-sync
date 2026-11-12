@@ -19,7 +19,7 @@
 
 生产部署的构建变量 `WRANGLER_SEND_METRICS=false` 已关闭 Wrangler 匿名遥测，`preview_urls = false` 已关闭预览链接。生产固定地址仍使用 `workers.dev`，方便后续生成稳定订阅链接。
 
-D1 是可选项。启用 `SUBSCRIPTION_AUDIT` 后，运行 `migrations/0001_audit.sql`，它只保存刷新时间、动作、原因、有效节点数和内容哈希，不保存原始订阅地址、Token 或生成的订阅正文。
+D1 是可选项。启用 `SUBSCRIPTION_AUDIT` 后，运行 `migrations/0001_audit.sql` 和 `migrations/0002_source_snapshots.sql`。除刷新审计外，`source_snapshots` 会保存每个源的历史有效节点 JSON，并按源内容哈希去重；源站暂时不可用时，Worker 会读取最近快照重新套用当前规则。它不保存原始订阅地址或 Token，但节点 JSON 可能包含 UUID、密码等敏感凭据，应限制 D1 访问权限。
 
 ## 多订阅配置
 
