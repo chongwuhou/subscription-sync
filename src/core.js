@@ -4,6 +4,7 @@ import {
   normalizeNode,
   renderClashYaml
 } from "./codec.js";
+import { normalizeClashConfig } from "./clash.js";
 
 function sortKeys(value) {
   if (Array.isArray(value)) return value.map(sortKeys);
@@ -69,7 +70,8 @@ export async function buildAggregateCandidate(nodeGroups, options = {}) {
   }
   const nodes = sortNodes(deduped.values());
   const valid = nodes.length >= minValidNodes;
-  const canonical = valid ? stableStringify(nodes) : null;
+  const clashConfig = normalizeClashConfig(options.clashConfig);
+  const canonical = valid ? stableStringify({ nodes, clashConfig }) : null;
   const hashFn = options.hashFn ?? sha256Hex;
   const contentHash = valid ? await hashFn(canonical) : null;
   return {
@@ -78,7 +80,7 @@ export async function buildAggregateCandidate(nodeGroups, options = {}) {
     minValidNodes,
     contentHash,
     nodes,
-    output: valid ? renderClashYaml(nodes) : null
+    output: valid ? renderClashYaml(nodes, clashConfig) : null
   };
 }
 
@@ -97,7 +99,8 @@ export async function buildCandidate(rawText, options = {}) {
   }
   const nodes = sortNodes(deduped.values());
   const valid = nodes.length >= minValidNodes;
-  const canonical = valid ? stableStringify(nodes) : null;
+  const clashConfig = normalizeClashConfig(options.clashConfig);
+  const canonical = valid ? stableStringify({ nodes, clashConfig }) : null;
   const hashFn = options.hashFn ?? sha256Hex;
   const contentHash = valid ? await hashFn(canonical) : null;
   return {
@@ -106,7 +109,7 @@ export async function buildCandidate(rawText, options = {}) {
     minValidNodes,
     contentHash,
     nodes,
-    output: valid ? renderClashYaml(nodes) : null
+    output: valid ? renderClashYaml(nodes, clashConfig) : null
   };
 }
 
