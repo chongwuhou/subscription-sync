@@ -73,25 +73,58 @@ const ADMIN_HTML = `<!doctype html>
       if (placeholder) input.placeholder = placeholder;
       wrapper.appendChild(input);
       parent.appendChild(wrapper);
+      return input;
+    }
+    function publicLinkFor(token) {
+      return token ? location.origin + "/sub/" + encodeURIComponent(token) : "";
+    }
+    function publicTokenFromLink(value, index) {
+      const text = value.trim();
+      if (!text) return "";
+      if (/^[A-Za-z0-9_-]{1,128}$/.test(text)) return text;
+      let parsed;
+      try { parsed = new URL(text, location.origin); } catch { throw new Error("订阅 " + (index + 1) + " 的输出地址不是合法 URL"); }
+      if (parsed.origin !== location.origin || parsed.search || parsed.hash || !parsed.pathname.startsWith("/sub/")) {
+        throw new Error("订阅 " + (index + 1) + " 的输出地址只能修改 /sub/ 后面的路径，域名不能改");
+      }
+      const token = decodeURIComponent(parsed.pathname.slice("/sub/".length));
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(token)) throw new Error("订阅 " + (index + 1) + " 的输出地址路径只能使用字母、数字、下划线和短横线");
+      return token;
     }
     function render() {
       root.replaceChildren();
       if (state.profiles.length === 0) {
         const empty = document.createElement("p");
         empty.className = "muted";
-        empty.textContent = "当前没有保存的订阅。请先点击“新增订阅”，填写 ID、名称、源头订阅地址和固定链接 Token，再点击“保存订阅配置”。";
+        empty.textContent = "当前没有保存的订阅。请先点击“新增订阅”，填写 ID、名称和完整源头订阅地址，再点击“保存订阅配置”。";
         root.appendChild(empty);
         return;
       }
       state.profiles.forEach((profile, index) => {
         const card = document.createElement("fieldset");
-        card.dataset.publicToken = profile.publicToken || "";
         const legend = document.createElement("legend");
         legend.textContent = "订阅 " + (index + 1);
         card.appendChild(legend);
         addField(card, "id", "ID", profile.id, "text", "例如：main 或 backup");
         addField(card, "name", "名称", profile.name, "text", "例如：主订阅");
         addField(card, "sourceUrl", "完整源头订阅地址（把 ?token=... 一起粘贴，仅管理员可见）", profile.sourceUrl, "url", "https://供应商.example/subscribe?token=...");
+        const publicLinkInput = addField(card, "publicLink", "修改后的通用订阅地址（可修改 /sub/ 后面的路径）", publicLinkFor(profile.publicToken), "url", location.origin + "/sub/保存后自动生成");
+        const copyLink = document.createElement("button");
+        copyLink.type = "button";
+        copyLink.textContent = "复制地址";
+        copyLink.onclick = async () => {
+          const text = publicLinkInput.value.trim();
+          if (!text) { setStatus("请先保存订阅，系统会生成通用订阅地址"); return; }
+          try {
+            await navigator.clipboard.writeText(text);
+            setStatus("已复制通用订阅地址");
+          } catch {
+            publicLinkInput.focus();
+            publicLinkInput.select();
+            setStatus("浏览器禁止自动复制，请按 Ctrl+C 复制已选中的地址");
+          }
+        };
+        card.appendChild(copyLink);
         addField(card, "minValidNodes", "最低有效节点数", profile.minValidNodes || 1, "number");
         addField(card, "defaultTarget", "无法识别客户端时的格式（clash/base64/sing-box/links）", profile.defaultTarget || "clash", "text", "clash");
         addField(card, "renameRules", "改名规则 JSON", JSON.stringify(profile.renameRules || [], null, 2), "textarea", '[{"pattern":"\\\\s*\\\\|\\\\s*","replacement":"-"}]');
@@ -130,6 +163,7 @@ const ADMIN_HTML = `<!doctype html>
         const id = value("id").trim();
         const name = value("name").trim();
         const sourceUrl = value("sourceUrl").trim();
+        const publicToken = publicTokenFromLink(value("publicLink"), index);
         if (!id || !name || !sourceUrl) {
           throw new Error("订阅 " + (index + 1) + " 还没有填写完整：ID、名称和完整源头订阅地址都必填");
         }
@@ -143,7 +177,7 @@ const ADMIN_HTML = `<!doctype html>
           id,
           name,
           sourceUrl,
-          publicToken: card.dataset.publicToken || "",
+          publicToken,
           minValidNodes: Number(value("minValidNodes")),
           defaultTarget: value("defaultTarget").trim(),
           renameRules
