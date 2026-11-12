@@ -38,6 +38,9 @@ const ADMIN_HTML = `<!doctype html>
     .rules-help summary { cursor: pointer; font-weight: 600; }
     .rules-help pre { overflow-x: auto; white-space: pre-wrap; font-size: .9rem; }
     .rules-help code { font-family: ui-monospace, monospace; }
+    .profile-card { margin: 1rem 0; padding: .45rem .8rem; border: 1px solid #8885; border-radius: 8px; }
+    .profile-card > summary { cursor: pointer; font-weight: 700; padding: .25rem 0; }
+    .profile-card fieldset { margin: .5rem 0 0; padding: 0; border: 0; }
     .preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; margin: .8rem 0; }
     .preview-pane { border: 1px solid #8885; border-radius: 6px; padding: .6rem; min-width: 0; }
     .preview-pane h3 { margin: 0 0 .4rem; font-size: 1rem; }
@@ -174,17 +177,19 @@ const ADMIN_HTML = `<!doctype html>
       if (state.profiles.length === 0) {
         const empty = document.createElement("p");
         empty.className = "muted";
-        empty.textContent = "当前没有保存的订阅。请先点击“新增订阅”，填写 ID、名称和完整源头订阅地址，再点击“保存订阅配置”。";
+        empty.textContent = "当前没有保存的订阅。请先点击“新增订阅”，填写订阅名称/ID和完整源头订阅地址，再点击“保存订阅配置”。";
         root.appendChild(empty);
         return;
       }
       state.profiles.forEach((profile, index) => {
+        const profileCard = document.createElement("details");
+        profileCard.className = "profile-card";
+        profileCard.open = index === 0;
+        const summary = document.createElement("summary");
+        summary.textContent = "订阅 " + (index + 1) + " · " + (profile.id || "未命名");
+        profileCard.appendChild(summary);
         const card = document.createElement("fieldset");
-        const legend = document.createElement("legend");
-        legend.textContent = "订阅 " + (index + 1);
-        card.appendChild(legend);
-        addField(card, "id", "ID", profile.id, "text", "例如：main 或 backup");
-        addField(card, "name", "名称", profile.name, "text", "例如：主订阅");
+        addField(card, "id", "订阅名称 / ID（唯一）", profile.id, "text", "例如：主订阅 或 backup");
         addField(card, "sourceUrl", "完整源头订阅地址（把 ?token=... 一起粘贴，仅管理员可见）", profile.sourceUrl, "url", "https://供应商.example/subscribe?token=...");
         const publicLinkInput = addField(card, "publicLink", "修改后的通用订阅地址（可修改 /sub/ 后面的路径）", publicLinkFor(profile.publicToken), "url", location.origin + "/sub/保存后自动生成");
         const copyLink = document.createElement("button");
@@ -246,7 +251,8 @@ const ADMIN_HTML = `<!doctype html>
         remove.textContent = "删除此订阅";
         remove.onclick = () => { state.profiles.splice(index, 1); render(); };
         card.appendChild(remove);
-        root.appendChild(card);
+        profileCard.appendChild(card);
+        root.appendChild(profileCard);
       });
     }
     function collect() {
@@ -254,11 +260,10 @@ const ADMIN_HTML = `<!doctype html>
         const value = (key) => card.querySelector("[data-field='" + key + "']").value;
         const checked = (key) => card.querySelector("[data-field='" + key + "']").checked;
         const id = value("id").trim();
-        const name = value("name").trim();
         const sourceUrl = value("sourceUrl").trim();
         const publicToken = publicTokenFromLink(value("publicLink"), index);
-        if (!id || !name || !sourceUrl) {
-          throw new Error("订阅 " + (index + 1) + " 还没有填写完整：ID、名称和完整源头订阅地址都必填");
+        if (!id || !sourceUrl) {
+          throw new Error("订阅 " + (index + 1) + " 还没有填写完整：订阅名称/ID和完整源头订阅地址必填");
         }
         if (!/^https?:\\/\\//i.test(sourceUrl)) {
           throw new Error("订阅 " + (index + 1) + " 的源头订阅地址必须以 https:// 或 http:// 开头");
@@ -266,7 +271,7 @@ const ADMIN_HTML = `<!doctype html>
         const renameRules = parseRenameRulesInput(value("renameRules"), index);
         return {
           id,
-          name,
+          name: id,
           sourceUrl,
           publicToken,
           replaceAllFields: checked("replaceAllFields"),
