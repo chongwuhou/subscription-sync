@@ -45,7 +45,10 @@ class MemoryD1 {
             const row = this.snapshots
               .filter((item) => item[0] === values[0])
               .sort((left, right) => String(right[1]).localeCompare(String(left[1])))[0];
-            return row ? { nodes_json: row[4] } : null;
+            if (!row) return null;
+            return sql.trimStart().startsWith("SELECT captured_at")
+              ? { captured_at: row[1], valid_count: row[3] }
+              : { nodes_json: row[4] };
           }
         };
       }
@@ -127,6 +130,7 @@ test("reprocesses the latest D1 source snapshot when the source is unavailable",
     assert.equal(audit.snapshots.length, 1);
 
     env.RENAME_RULES_JSON = JSON.stringify([{ pattern: "US", replacement: "United States" }]);
+    const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => { throw new Error("source window closed"); };
     const fallback = await refresh(env, new Date("2026-11-12T00:06:00.000Z"));
     assert.equal(fallback.action, "update");
@@ -277,7 +281,18 @@ test("admin API manages subscriptions and refresh interval without public access
   const importedState = JSON.parse(await state.get("published-state-v1:工作一"));
   assert.match(importedState.output, /rule-providers/);
 
-  const originalFetch = globalThis.fetch;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error("source window closed"); };
+    const historyPreviewResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/preview", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ id: "工作一", renameRules: [{ pattern: "One", replacement: "1" }] })
+    }), env);
+    assert.equal(historyPreviewResponse.status, 200);
+    const historyPreview = await historyPreviewResponse.json();
+    assert.equal(historyPreview.source, "history");
+    assert.equal(historyPreview.original[0].name, "US | One");
+
   globalThis.fetch = async () => new Response(validSource, { status: 200 });
   try {
     const previewResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/preview", {
