@@ -1,4 +1,4 @@
-import { buildAggregateCandidate, buildCandidate, buildPreview, decidePublication } from "./core.js";
+import { buildAggregateCandidate, buildCandidate, buildCandidateFromNodes, buildPreview, decidePublication } from "./core.js";
 import {
   parseSubscriptionProfiles,
   parseSubscriptionProfilesJson,
@@ -15,6 +15,7 @@ const AGGREGATE_PUBLIC_TOKEN_KEY = "subscription-aggregate-config-v1";
 const AGGREGATE_STATE_ID = "__all__";
 const LAST_REFRESH_KEY = "subscription-refresh-meta-v1";
 const DEFAULT_REFRESH_INTERVAL_MINUTES = 30;
+let sourceSnapshotSchemaPromise = null;
 
 const ADMIN_HTML = `<!doctype html>
 <html lang="zh-CN">
@@ -618,6 +619,7 @@ async function handleAdminApi(request, env, url) {
       if (checked.error) return json({ error: checked.error }, 400);
       await env.SUBSCRIPTION_STATE.put(ADMIN_CONFIG_KEY, JSON.stringify(checked.profiles));
       await ensureAggregateToken(env, body?.aggregatePublicToken);
+      await reprocessConfiguredProfiles(env, checked.profiles);
       return json({ ok: true, count: checked.profiles.length });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "invalid-json" }, 400);
@@ -635,6 +637,7 @@ async function handleAdminApi(request, env, url) {
         ? normalizeClashConfig(body.clashConfig, true)
         : current.clashConfig;
       await env.SUBSCRIPTION_STATE.put(ADMIN_SETTINGS_KEY, JSON.stringify({ refreshIntervalMinutes: value, clashConfig }));
+      await reprocessConfiguredProfiles(env, await loadProfiles(env), new Date(), { refreshIntervalMinutes: value, clashConfig });
       return json({ ok: true, refreshIntervalMinutes: value });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "invalid-json" }, 400);
@@ -678,6 +681,65 @@ async function saveState(env, profileId, state) {
   await env.SUBSCRIPTION_STATE.put(stateKey(profileId), JSON.stringify(state));
 }
 
+async function publishDecision(env, profileId, decision, now) {
+  if (decision.action === "keep") return decision;
+  await saveState(env, profileId, {
+    version: 1,
+    subscriptionId: profileId,
+    contentHash: decision.contentHash,
+    sourceContentHash: decision.sourceContentHash,
+    validCount: decision.validCount,
+    updatedAt: now.toISOString(),
+    sourceNodes: decision.sourceNodes ?? decision.nodes,
+    nodes: decision.nodes,
+    output: decision.output
+  });
+  return decision;
+}
+
+async function writeSourceSnapshot(env, profileId, candidate, now) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare || !candidate?.valid || !candidate.sourceContentHash) return;
+  try {
+    if (!await ensureSourceSnapshotSchema(env)) return;
+    const nodes = Array.isArray(candidate.sourceNodes) ? candidate.sourceNodes : [];
+    await env.SUBSCRIPTION_AUDIT
+      .prepare("INSERT OR IGNORE INTO source_snapshots (subscription_id, captured_at, source_content_hash, valid_count, nodes_json) VALUES (?, ?, ?, ?, ?)")
+      .bind(profileId, now.toISOString(), candidate.sourceContentHash, candidate.validCount, JSON.stringify(nodes))
+      .run();
+  } catch {
+    console.log(JSON.stringify({ event: "source-snapshot-write-failed" }));
+  }
+}
+
+async function loadLatestSourceSnapshot(env, profileId) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare) return null;
+  try {
+    if (!await ensureSourceSnapshotSchema(env)) return null;
+    const result = await env.SUBSCRIPTION_AUDIT
+      .prepare("SELECT nodes_json FROM source_snapshots WHERE subscription_id = ? ORDER BY captured_at DESC, id DESC LIMIT 1")
+      .bind(profileId)
+      .first();
+    if (!result?.nodes_json) return null;
+    const nodes = JSON.parse(result.nodes_json);
+    return Array.isArray(nodes) ? nodes : null;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureSourceSnapshotSchema(env) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare) return false;
+  if (!sourceSnapshotSchemaPromise) {
+    sourceSnapshotSchemaPromise = env.SUBSCRIPTION_AUDIT
+      .prepare("CREATE TABLE IF NOT EXISTS source_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, subscription_id TEXT NOT NULL, captured_at TEXT NOT NULL, source_content_hash TEXT NOT NULL, valid_count INTEGER NOT NULL, nodes_json TEXT NOT NULL, UNIQUE (subscription_id, source_content_hash))")
+      .bind()
+      .run()
+      .then(() => true)
+      .catch(() => false);
+  }
+  return sourceSnapshotSchemaPromise;
+}
+
 async function writeAudit(env, profileId, result, now) {
   if (!env.SUBSCRIPTION_AUDIT?.prepare) return;
   try {
@@ -698,6 +760,51 @@ async function writeAudit(env, profileId, result, now) {
   }
 }
 
+async function reprocessStoredProfile(env, profile, now, settings, previous = null, fallbackReason = "historical-reprocess") {
+  const state = previous ?? await loadState(env, profile.id);
+  const snapshotNodes = await loadLatestSourceSnapshot(env, profile.id);
+  const historicalNodes = snapshotNodes?.length > 0
+    ? snapshotNodes
+    : Array.isArray(state?.sourceNodes) && state.sourceNodes.length > 0
+      ? state.sourceNodes
+      : Array.isArray(state?.nodes) && state.nodes.length > 0
+        ? state.nodes
+        : [];
+  if (historicalNodes.length === 0) {
+    return { action: "keep", reason: "no-historical-valid-nodes" };
+  }
+  try {
+    const candidate = await buildCandidateFromNodes(historicalNodes, {
+      renameRules: profile.renameRules,
+      replaceAllFields: profile.replaceAllFields,
+      minValidNodes: profile.minValidNodes,
+      clashConfig: settings.clashConfig
+    });
+    if (!candidate.valid) return { action: "keep", reason: "historical-nodes-below-minimum", validCount: candidate.validCount };
+    await writeSourceSnapshot(env, profile.id, candidate, now);
+    const decision = await publishDecision(env, profile.id, decidePublication(candidate, state), now);
+    if (decision.action === "keep") {
+      return { ...decision, reason: fallbackReason, validCount: candidate.validCount };
+    }
+    return { ...decision, reason: fallbackReason };
+  } catch (error) {
+    return { action: "keep", reason: "historical-reprocess-error", error: error instanceof Error ? error.message : "unknown" };
+  }
+}
+
+async function reprocessConfiguredProfiles(env, profiles, now = new Date(), settings = null) {
+  const currentSettings = settings ?? await loadSettings(env);
+  const results = [];
+  for (const profile of profiles) {
+    results.push({
+      subscriptionId: profile.id,
+      ...(await reprocessStoredProfile(env, profile, now, currentSettings))
+    });
+  }
+  const aggregate = await refreshAggregate(env, now, profiles, currentSettings);
+  return { results, aggregate };
+}
+
 async function refreshProfile(env, profile, now, settings = null) {
   const finish = async (result) => {
     await writeAudit(env, profile.id, result, now);
@@ -707,16 +814,21 @@ async function refreshProfile(env, profile, now, settings = null) {
     return finish({ action: "keep", reason: "state-store-not-configured" });
   }
   const previous = await loadState(env, profile.id);
+  const currentSettings = settings ?? await loadSettings(env);
   let rawText;
   try {
     rawText = await fetchSource(env, profile);
   } catch (error) {
-    return finish({ action: "keep", reason: "source-error", error: error instanceof Error ? error.message : "unknown" });
+    const fallback = await reprocessStoredProfile(env, profile, now, currentSettings, previous, "source-unavailable-use-last-good");
+    return finish(fallback.reason === "no-historical-valid-nodes" ? {
+      ...fallback,
+      reason: "source-error",
+      error: error instanceof Error ? error.message : "unknown"
+    } : fallback);
   }
 
   let candidate;
   try {
-    const currentSettings = settings ?? await loadSettings(env);
     candidate = await buildCandidate(rawText, {
       renameRules: profile.renameRules,
       replaceAllFields: profile.replaceAllFields,
@@ -724,21 +836,21 @@ async function refreshProfile(env, profile, now, settings = null) {
       clashConfig: currentSettings.clashConfig
     });
   } catch (error) {
-    return finish({ action: "keep", reason: "parse-error", error: error instanceof Error ? error.message : "unknown" });
+    const fallback = await reprocessStoredProfile(env, profile, now, currentSettings, previous, "latest-parse-error-use-last-good");
+    return finish(fallback.reason === "no-historical-valid-nodes" ? {
+      ...fallback,
+      reason: "parse-error",
+      error: error instanceof Error ? error.message : "unknown"
+    } : fallback);
   }
 
+  if (candidate.valid) await writeSourceSnapshot(env, profile.id, candidate, now);
   const decision = decidePublication(candidate, previous);
-  if (decision.action === "keep") return finish(decision);
-  await saveState(env, profile.id, {
-    version: 1,
-    subscriptionId: profile.id,
-    contentHash: decision.contentHash,
-    validCount: decision.validCount,
-    updatedAt: now.toISOString(),
-    nodes: decision.nodes,
-    output: decision.output
-  });
-  return finish(decision);
+  if (!candidate.valid) {
+    const fallback = await reprocessStoredProfile(env, profile, now, currentSettings, previous, "latest-invalid-use-last-good");
+    return finish(fallback.reason === "no-historical-valid-nodes" ? decision : fallback);
+  }
+  return finish(await publishDecision(env, profile.id, decision, now));
 }
 
 export async function refreshAll(env, now = new Date()) {
@@ -756,13 +868,13 @@ export async function refreshAll(env, now = new Date()) {
   return results;
 }
 
-export async function refreshAggregate(env, now = new Date(), profiles = null) {
+export async function refreshAggregate(env, now = new Date(), profiles = null, settings = null) {
   const sourceProfiles = profiles ?? await loadProfiles(env);
   if (sourceProfiles.length === 0) return { subscriptionId: "all", action: "keep", reason: "no-subscriptions-configured" };
   if (!env.SUBSCRIPTION_STATE?.get || !env.SUBSCRIPTION_STATE?.put) {
     return { subscriptionId: "all", action: "keep", reason: "state-store-not-configured" };
   }
-  const settings = await loadSettings(env);
+  const currentSettings = settings ?? await loadSettings(env);
   const nodeGroups = [];
   for (const profile of sourceProfiles) {
     const state = await loadState(env, profile.id);
@@ -770,7 +882,7 @@ export async function refreshAggregate(env, now = new Date(), profiles = null) {
   }
   let candidate;
   try {
-    candidate = await buildAggregateCandidate(nodeGroups, { clashConfig: settings.clashConfig });
+    candidate = await buildAggregateCandidate(nodeGroups, { clashConfig: currentSettings.clashConfig });
   } catch (error) {
     return { subscriptionId: "all", action: "keep", reason: "aggregate-error", error: error instanceof Error ? error.message : "unknown" };
   }
