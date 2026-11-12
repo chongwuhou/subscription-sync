@@ -165,6 +165,8 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(pageText, /修改后的通用订阅地址/);
   assert.match(pageText, /复制地址/);
   assert.match(pageText, /默认只替换名称/);
+  assert.match(pageText, /Clash \/ Mihomo 分流配置/);
+  assert.match(pageText, /Rule Providers|rule-providers/);
   assert.doesNotMatch(pageText, /固定链接路径 Token/);
 
   const unauthorized = await worker.fetch(new Request("https://worker.example.com/api/admin/subscriptions"), env);
@@ -190,7 +192,14 @@ test("admin API manages subscriptions and refresh interval without public access
   const settings = await worker.fetch(new Request("https://worker.example.com/api/admin/settings", {
     method: "PUT",
     headers,
-    body: JSON.stringify({ refreshIntervalMinutes: 15 })
+    body: JSON.stringify({
+      refreshIntervalMinutes: 15,
+      clashConfig: {
+        "proxy-groups": [{ name: "PROXY", type: "select", proxies: ["DIRECT", "{{NODES}}"] }],
+        "rule-providers": { ads: { type: "http", behavior: "domain", url: "https://rules.example.com/ads.yaml", path: "./ruleset/ads.yaml" } },
+        rules: ["RULE-SET,ads,REJECT", "MATCH,PROXY"]
+      }
+    })
   }), env);
   assert.equal(settings.status, 200);
 
@@ -203,6 +212,8 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(body.aggregatePublicToken, /^[A-Za-z0-9_-]{24,64}$/);
   assert.equal(body.subscriptions[0].minValidNodes, 1);
   assert.equal(body.refreshIntervalMinutes, 15);
+  assert.equal(body.clashConfig.rules[0], "RULE-SET,ads,REJECT");
+  assert.equal(body.clashConfig["rule-providers"].ads.type, "http");
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(validSource, { status: 200 });
