@@ -70,7 +70,8 @@ export function decidePublication(candidate, previous) {
       action: "keep",
       reason: "unchanged",
       validCount: candidate.validCount,
-      contentHash: candidate.contentHash
+      contentHash: candidate.contentHash,
+      nodes: candidate.nodes
     };
   }
   return {
@@ -78,6 +79,7 @@ export function decidePublication(candidate, previous) {
     reason: previous?.output ? "changed" : "first-valid-version",
     validCount: candidate.validCount,
     contentHash: candidate.contentHash,
+    nodes: candidate.nodes,
     output: candidate.output
   };
 }
