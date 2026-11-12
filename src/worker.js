@@ -27,7 +27,9 @@ const ADMIN_HTML = `<!doctype html>
     fieldset { margin: 1rem 0; border: 1px solid #8885; border-radius: 8px; }
     label { display: block; margin: .65rem 0; font-weight: 600; }
     input, textarea { display: block; box-sizing: border-box; width: 100%; margin-top: .3rem; padding: .55rem; font: inherit; }
-    textarea { min-height: 5rem; font-family: ui-monospace, monospace; }
+    textarea { min-height: 3.2rem; font-family: ui-monospace, monospace; }
+    .check-label { display: flex; align-items: center; gap: .5rem; }
+    .check-label input { width: auto; margin: 0; }
     button { margin: .35rem .5rem .35rem 0; padding: .55rem .8rem; font: inherit; cursor: pointer; }
     #status { min-height: 1.5rem; white-space: pre-wrap; }
     .muted { opacity: .75; }
@@ -81,6 +83,18 @@ const ADMIN_HTML = `<!doctype html>
       input.value = value == null ? "" : String(value);
       if (placeholder) input.placeholder = placeholder;
       wrapper.appendChild(input);
+      parent.appendChild(wrapper);
+      return input;
+    }
+    function addCheckbox(parent, key, label, checked) {
+      const wrapper = document.createElement("label");
+      wrapper.className = "check-label";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.dataset.field = key;
+      input.checked = checked === true;
+      wrapper.appendChild(input);
+      wrapper.appendChild(document.createTextNode(label));
       parent.appendChild(wrapper);
       return input;
     }
@@ -191,24 +205,15 @@ const ADMIN_HTML = `<!doctype html>
         card.appendChild(copyLink);
         addField(card, "minValidNodes", "最低有效节点数", profile.minValidNodes || 1, "number");
         addField(card, "defaultTarget", "无法识别客户端时的格式（clash/base64/sing-box/links）", profile.defaultTarget || "clash", "text", "clash");
+        addCheckbox(card, "replaceAllFields", "允许替换节点全部字段（高级；默认只替换名称）", profile.replaceAllFields);
         addField(card, "renameRules", "改名规则 JSON", JSON.stringify(profile.renameRules || [], null, 2), "textarea", '[{"pattern":"\\\\s*\\\\|\\\\s*","replacement":"-"}]');
         const help = document.createElement("details");
         help.className = "rules-help";
         const helpText = [
-          "1. 把 US | New York 变成 US-New York",
-          '[{"pattern":"\\\\s*\\\\|\\\\s*","replacement":"-"}]',
-          "",
-          "2. 把地区名称统一改名",
-          '[{"pattern":"香港","replacement":"HK"},{"pattern":"新加坡","replacement":"SG"}]',
-          "",
-          "3. 删除名称开头的机场标签",
-          '[{"pattern":"^\\\\s*机场[-_ ]*","replacement":""}]',
-          "",
-          "多个规则一行写法",
           '[{"pattern":"联通优选","replacement":"HK"},{"pattern":"Mbps","replacement":"1"}]'
         ].join("\\n");
-        help.innerHTML = '<summary>改名/替换规则案例（复制到上面的 JSON 框）</summary>' +
-          '<p class="muted">pattern 是 JavaScript 正则表达式；replacement 是替换后的文字；多个规则会按顺序执行，请放在同一个数组中（粘贴多个数组也会自动合并）。</p>' +
+        help.innerHTML = '<summary>一行规则示例</summary>' +
+          '<p class="muted">多个规则放在同一个数组中，按顺序执行；粘贴多个数组也会自动合并。默认只改名称。</p>' +
           '<pre><code>' + helpText + '</code></pre>';
         card.appendChild(help);
         const previewButton = document.createElement("button");
@@ -221,10 +226,11 @@ const ADMIN_HTML = `<!doctype html>
           previewGrid.replaceChildren();
           try {
             const renameRules = parseRenameRulesInput(card.querySelector("[data-field='renameRules']").value, index);
-            const data = await api("/api/admin/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.id, renameRules }) });
+            const replaceAllFields = card.querySelector("[data-field='replaceAllFields']").checked;
+            const data = await api("/api/admin/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.id, renameRules, replaceAllFields }) });
             renderPreviewPane(previewGrid, "原版", data.original || []);
             renderPreviewPane(previewGrid, "规则修改后", data.modified || []);
-            setStatus("已按当前文本框中的规则加载预览；预览不显示 UUID、密码等凭据。需要长期生效请点击“保存本订阅”或“保存订阅配置”");
+            setStatus("已按当前规则加载预览；默认只替换名称。需要长期生效请点击“保存本订阅”或“保存订阅配置”");
           } catch (error) { setStatus(error.message); }
           finally { previewButton.disabled = false; }
         };
@@ -246,6 +252,7 @@ const ADMIN_HTML = `<!doctype html>
     function collect() {
       return Array.from(root.querySelectorAll("fieldset")).map((card, index) => {
         const value = (key) => card.querySelector("[data-field='" + key + "']").value;
+        const checked = (key) => card.querySelector("[data-field='" + key + "']").checked;
         const id = value("id").trim();
         const name = value("name").trim();
         const sourceUrl = value("sourceUrl").trim();
@@ -262,6 +269,7 @@ const ADMIN_HTML = `<!doctype html>
           name,
           sourceUrl,
           publicToken,
+          replaceAllFields: checked("replaceAllFields"),
           minValidNodes: Number(value("minValidNodes")),
           defaultTarget: value("defaultTarget").trim(),
           renameRules
@@ -289,7 +297,7 @@ const ADMIN_HTML = `<!doctype html>
     };
     document.getElementById("reload").onclick = load;
     document.getElementById("add").onclick = () => {
-      state.profiles.push({ id: "", name: "", sourceUrl: "", publicToken: "", minValidNodes: 1, defaultTarget: "clash", renameRules: [] });
+      state.profiles.push({ id: "", name: "", sourceUrl: "", publicToken: "", replaceAllFields: false, minValidNodes: 1, defaultTarget: "clash", renameRules: [] });
       render();
     };
     async function saveAll(focusIndex = null) {
@@ -577,7 +585,8 @@ async function handleAdminApi(request, env, url) {
       if (!profile) return json({ error: "subscription-not-found" }, 404);
       const rawText = await fetchSource(env, profile);
       const renameRules = Array.isArray(body?.renameRules) ? body.renameRules : profile.renameRules;
-      const preview = buildPreview(rawText, { renameRules });
+      const replaceAllFields = typeof body?.replaceAllFields === "boolean" ? body.replaceAllFields : profile.replaceAllFields;
+      const preview = buildPreview(rawText, { renameRules, replaceAllFields });
       return json({
         subscriptionId: profile.id,
         original: preview.original.map(previewNode),
@@ -646,6 +655,7 @@ async function refreshProfile(env, profile, now) {
   try {
     candidate = await buildCandidate(rawText, {
       renameRules: profile.renameRules,
+      replaceAllFields: profile.replaceAllFields,
       minValidNodes: profile.minValidNodes
     });
   } catch (error) {
