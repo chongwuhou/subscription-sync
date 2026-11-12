@@ -76,6 +76,7 @@ function normalizeProfile(item, index) {
     nodeNameIncludeAll: normalizeNodeNameFilter(item.nodeNameIncludeAll),
     nodeNameExclude: normalizeNodeNameFilter(item.nodeNameExclude),
     replaceAllFields: item.replaceAllFields === true,
+    paused: item.paused === true,
     minValidNodes: normalizeMinValidNodes(item.minValidNodes ?? 1),
     defaultTarget: String(item.defaultTarget ?? "clash").trim() || "clash"
   };
@@ -135,6 +136,7 @@ export function parseSubscriptionProfiles(env) {
     nodeNameIncludeAll: normalizeNodeNameFilter(env.INCLUDE_NODE_NAMES_ALL),
     nodeNameExclude: normalizeNodeNameFilter(env.EXCLUDE_NODE_NAMES),
     replaceAllFields: String(env.REPLACE_ALL_FIELDS ?? "").toLowerCase() === "true",
+    paused: false,
     minValidNodes: normalizeMinValidNodes(env.MIN_VALID_NODES ?? 1),
     defaultTarget: String(env.DEFAULT_TARGET ?? "clash").trim() || "clash"
   }];

@@ -51,6 +51,13 @@ const ADMIN_HTML = `<!doctype html>
     .preview-pane { border: 1px solid #8885; border-radius: 6px; padding: .6rem; min-width: 0; }
     .preview-pane h3 { margin: 0 0 .4rem; font-size: 1rem; }
     .preview-pane ul { margin: 0; padding-left: 1.2rem; max-height: 16rem; overflow: auto; }
+    .history-panel { margin: .8rem 0; padding: .65rem .75rem; border: 1px solid #8885; border-radius: 6px; }
+    .history-panel > summary { cursor: pointer; font-weight: 600; }
+    .history-version-row { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin: .55rem 0 0; padding: .55rem; border: 1px solid #8884; border-radius: 5px; }
+    .history-version-meta { min-width: 0; }
+    .history-version-meta strong { display: block; }
+    .history-version-meta small { display: block; margin-top: .15rem; opacity: .75; overflow-wrap: anywhere; }
+    .history-version-row button { flex: 0 0 auto; margin: 0; }
     .rename-rules { margin: .8rem 0; padding: .7rem; border: 1px solid #8885; border-radius: 6px; }
     .rename-rules-title { font-weight: 600; margin-bottom: .5rem; }
     .rename-rule-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; gap: .45rem; align-items: end; margin: .45rem 0; }
@@ -378,6 +385,67 @@ const ADMIN_HTML = `<!doctype html>
           historyNote.textContent = "已绑定历史源（" + (profile.sourceStorage === "d1" ? "D1" : "KV 兜底") + "）：" + (profile.validCount || 0) + " 个有效节点，保存于 " + new Date(profile.capturedAt).toLocaleString();
           card.appendChild(historyNote);
         }
+        const historyVersions = Array.isArray(profile.historyVersions) ? profile.historyVersions : [];
+        const historyPanel = document.createElement("details");
+        historyPanel.className = "history-panel";
+        const historySummary = document.createElement("summary");
+        historySummary.textContent = "历史内容版本（" + historyVersions.length + " 个）";
+        historyPanel.appendChild(historySummary);
+        const historyHint = document.createElement("p");
+        historyHint.className = "muted";
+        historyHint.textContent = "只按源头内容去重；相同内容的不同刷新时间不会重复显示。选择后会立即套用当前规则并发布。";
+        historyPanel.appendChild(historyHint);
+        if (historyVersions.length === 0) {
+          const emptyHistory = document.createElement("p");
+          emptyHistory.className = "muted";
+          emptyHistory.textContent = "暂无不同内容版本";
+          historyPanel.appendChild(emptyHistory);
+        } else {
+          historyVersions.forEach((version) => {
+            const row = document.createElement("div");
+            row.className = "history-version-row";
+            const meta = document.createElement("div");
+            meta.className = "history-version-meta";
+            const title = document.createElement("strong");
+            title.textContent = new Date(version.capturedAt).toLocaleString() + " · " + Number(version.validCount || 0) + " 个有效节点";
+            meta.appendChild(title);
+            const hash = document.createElement("small");
+            hash.textContent = "内容版本：" + String(version.sourceContentHash || "").slice(0, 12);
+            meta.appendChild(hash);
+            row.appendChild(meta);
+            const pauseLabel = document.createElement("label");
+            pauseLabel.className = "check-label";
+            const pauseInput = document.createElement("input");
+            pauseInput.type = "checkbox";
+            pauseInput.checked = profile.paused === true;
+            pauseLabel.appendChild(pauseInput);
+            pauseLabel.appendChild(document.createTextNode("同时暂停自动更新"));
+            row.appendChild(pauseLabel);
+            const useButton = document.createElement("button");
+            useButton.type = "button";
+            useButton.textContent = "使用此版本";
+            useButton.onclick = async () => {
+              useButton.disabled = true;
+              pauseInput.disabled = true;
+              try {
+                const data = await api("/api/admin/history/use", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ id: profile.id, sourceContentHash: version.sourceContentHash, pauseUpdates: pauseInput.checked })
+                });
+                await load();
+                setStatus("已使用 " + profile.id + " 的历史版本并重新发布（" + data.validCount + " 个有效节点）" + (pauseInput.checked ? "，自动更新已暂停" : ""));
+              } catch (error) {
+                setStatus(error.message);
+                useButton.disabled = false;
+                pauseInput.disabled = false;
+              }
+            };
+            row.appendChild(useButton);
+            historyPanel.appendChild(row);
+          });
+        }
+        card.appendChild(historyPanel);
         const publicLinkInput = addField(card, "publicLink", "修改后的通用订阅地址（可修改 /sub/ 后面的路径）", publicLinkFor(profile.publicToken), "url", location.origin + "/sub/保存后自动生成");
         const copyLink = document.createElement("button");
         copyLink.type = "button";
@@ -399,6 +467,7 @@ const ADMIN_HTML = `<!doctype html>
         addField(card, "nodeNameInclude", "节点名称保留（或；多个关键词用 | 分隔，例如：美国|VIP2）", profile.nodeNameInclude || "", "text", "命中任一关键词，留空表示不限制");
         addField(card, "nodeNameIncludeAll", "节点名称同时包含（且；多个关键词用 | 分隔，例如：美国|VIP2）", profile.nodeNameIncludeAll || "", "text", "必须同时命中全部关键词，留空表示不限制");
         addField(card, "nodeNameExclude", "节点名称排除（可选；多个关键词用 | 分隔，例如：到期|续费）", profile.nodeNameExclude || "", "text", "留空表示不排除");
+        addCheckbox(card, "paused", "暂停自动更新（固定当前已发布版本）", profile.paused === true);
         const filterHelp = document.createElement("p");
         filterHelp.className = "muted";
         filterHelp.textContent = "处理顺序：先按原始节点名称过滤，再执行改名规则；“或”命中任一，“且”必须全部命中，排除命中任一就排除；关键词是不区分大小写的名称包含匹配。三项都留空就是不过滤。";
@@ -463,6 +532,7 @@ const ADMIN_HTML = `<!doctype html>
           sourceUrl,
           publicToken,
           replaceAllFields: checked("replaceAllFields"),
+          paused: checked("paused"),
           nodeNameInclude: value("nodeNameInclude").trim(),
           nodeNameIncludeAll: value("nodeNameIncludeAll").trim(),
           nodeNameExclude: value("nodeNameExclude").trim(),
@@ -495,7 +565,7 @@ const ADMIN_HTML = `<!doctype html>
     };
     document.getElementById("reload").onclick = load;
     document.getElementById("add").onclick = () => {
-      state.profiles.push({ id: "", name: "", sourceUrl: "", publicToken: "", nodeNameInclude: "", nodeNameIncludeAll: "", nodeNameExclude: "", replaceAllFields: false, minValidNodes: 1, defaultTarget: "clash", renameRules: [] });
+      state.profiles.push({ id: "", name: "", sourceUrl: "", publicToken: "", nodeNameInclude: "", nodeNameIncludeAll: "", nodeNameExclude: "", replaceAllFields: false, paused: false, minValidNodes: 1, defaultTarget: "clash", renameRules: [] });
       render();
     };
     async function saveAll(focusIndex = null) {
@@ -768,17 +838,19 @@ async function handleAdminApi(request, env, url) {
     const aggregatePublicToken = await ensureAggregateToken(env);
     const subscriptions = await Promise.all(current.profiles.map(async (profile) => {
       const d1Meta = await loadLatestSourceSnapshotMeta(env, profile.id);
-      if (d1Meta) return { ...profile, ...d1Meta, sourceStorage: "d1" };
+      const historyVersions = await listSourceSnapshotMeta(env, profile.id);
+      if (d1Meta) return { ...profile, ...d1Meta, historyVersions, sourceStorage: "d1" };
       const state = await loadState(env, profile.id);
       if (state?.sourceSnapshotAt || state?.sourceNodes?.length || state?.nodes?.length) {
         return {
           ...profile,
           capturedAt: state.sourceSnapshotAt ?? state.updatedAt ?? "",
           validCount: Number(state.validCount ?? state.nodes?.length ?? 0),
+          historyVersions,
           sourceStorage: "kv"
         };
       }
-      return profile;
+      return { ...profile, historyVersions };
     }));
     return json({
       managed: current.managed,
@@ -823,6 +895,62 @@ async function handleAdminApi(request, env, url) {
       return json({ ok: true, count: checked.profiles.length, expiredSubscription });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "invalid-json" }, 400);
+    }
+  }
+  if (url.pathname === "/api/admin/history/use" && request.method === "POST") {
+    try {
+      const body = await readJsonBody(request);
+      const id = String(body?.id ?? "").trim();
+      const sourceContentHash = String(body?.sourceContentHash ?? "").trim().toLowerCase();
+      if (!id || !/^[a-f0-9]{64}$/.test(sourceContentHash)) return json({ error: "invalid-history-version" }, 400);
+      const profile = (await loadProfiles(env)).find((item) => item.id === id);
+      if (!profile) return json({ error: "subscription-not-found" }, 404);
+      const snapshot = await loadSourceSnapshotByHash(env, profile.id, sourceContentHash);
+      if (!snapshot?.nodes?.length) return json({ error: "history-version-not-found" }, 404);
+      const settings = await loadSettings(env);
+      const previous = await loadState(env, profile.id);
+      const candidate = await buildCandidateFromNodes(snapshot.nodes, {
+        renameRules: profile.renameRules,
+        nodeNameInclude: profile.nodeNameInclude,
+        nodeNameIncludeAll: profile.nodeNameIncludeAll,
+        nodeNameExclude: profile.nodeNameExclude,
+        replaceAllFields: profile.replaceAllFields,
+        minValidNodes: profile.minValidNodes,
+        clashConfig: settings.clashConfig
+      });
+      if (!candidate.valid) {
+        return json({ error: "historical-version-below-minimum", validCount: candidate.validCount, minValidNodes: candidate.minValidNodes }, 400);
+      }
+      const pauseUpdates = Object.prototype.hasOwnProperty.call(body ?? {}, "pauseUpdates")
+        ? body.pauseUpdates === true
+        : profile.paused === true;
+      const current = await storedProfiles(env);
+      const checked = validateSubscriptionProfiles(current.profiles.map((item) => item.id === id ? { ...item, paused: pauseUpdates } : item));
+      if (checked.error) return json({ error: checked.error }, 400);
+      await env.SUBSCRIPTION_STATE.put(ADMIN_CONFIG_KEY, JSON.stringify(checked.profiles));
+      const now = new Date();
+      const decision = decidePublication(candidate, previous);
+      const published = await publishDecision(env, profile.id, decision, now, {
+        sourceOrigin: "manual-history",
+        sourceSnapshotAt: snapshot.capturedAt
+      });
+      await writeAudit(env, profile.id, published, now);
+      const profiles = await loadProfiles(env);
+      const aggregate = await refreshAggregate(env, now, profiles, settings);
+      return json({
+        ok: true,
+        subscriptionId: profile.id,
+        versionId: snapshot.versionId,
+        capturedAt: snapshot.capturedAt,
+        sourceContentHash: snapshot.sourceContentHash,
+        action: published.action,
+        reason: published.reason,
+        validCount: candidate.validCount,
+        paused: pauseUpdates,
+        aggregateAction: aggregate.action
+      });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : "history-version-use-failed" }, 400);
     }
   }
   if (url.pathname === "/api/admin/import" && request.method === "POST") {
@@ -1017,6 +1145,48 @@ async function loadLatestSourceSnapshotMeta(env, profileId) {
   }
 }
 
+async function listSourceSnapshotMeta(env, profileId) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare) return [];
+  try {
+    if (!await ensureSourceSnapshotSchema(env)) return [];
+    const result = await env.SUBSCRIPTION_AUDIT
+      .prepare("SELECT id, captured_at, source_content_hash, valid_count FROM source_snapshots WHERE subscription_id = ? ORDER BY captured_at DESC, id DESC")
+      .bind(profileId)
+      .all();
+    return (Array.isArray(result?.results) ? result.results : []).map((row) => ({
+      versionId: String(row.id ?? ""),
+      capturedAt: String(row.captured_at ?? ""),
+      sourceContentHash: String(row.source_content_hash ?? ""),
+      validCount: Number(row.valid_count ?? 0)
+    })).filter((row) => row.sourceContentHash);
+  } catch {
+    return [];
+  }
+}
+
+async function loadSourceSnapshotByHash(env, profileId, sourceContentHash) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare) return null;
+  try {
+    if (!await ensureSourceSnapshotSchema(env)) return null;
+    const result = await env.SUBSCRIPTION_AUDIT
+      .prepare("SELECT id, captured_at, source_content_hash, valid_count, nodes_json FROM source_snapshots WHERE subscription_id = ? AND source_content_hash = ? ORDER BY id DESC LIMIT 1")
+      .bind(profileId, sourceContentHash)
+      .first();
+    if (!result?.nodes_json) return null;
+    const nodes = JSON.parse(result.nodes_json);
+    if (!Array.isArray(nodes)) return null;
+    return {
+      versionId: String(result.id ?? ""),
+      capturedAt: String(result.captured_at ?? ""),
+      sourceContentHash: String(result.source_content_hash ?? sourceContentHash),
+      validCount: Number(result.valid_count ?? nodes.length),
+      nodes
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function ensureSourceSnapshotSchema(env) {
   if (!env.SUBSCRIPTION_AUDIT?.prepare) return false;
   if (!sourceSnapshotSchemaPromise) {
@@ -1097,7 +1267,9 @@ async function reprocessConfiguredProfiles(env, profiles, now = new Date(), sett
   for (const profile of profiles) {
     results.push({
       subscriptionId: profile.id,
-      ...(await reprocessStoredProfile(env, profile, now, currentSettings))
+      ...(profile.paused
+        ? { action: "keep", reason: "paused" }
+        : await reprocessStoredProfile(env, profile, now, currentSettings))
     });
   }
   const aggregate = await refreshAggregate(env, now, profiles, currentSettings);
@@ -1109,6 +1281,7 @@ async function refreshProfile(env, profile, now, settings = null) {
     await writeAudit(env, profile.id, result, now);
     return result;
   };
+  if (profile.paused) return finish({ action: "keep", reason: "paused" });
   if (!env.SUBSCRIPTION_STATE?.get || !env.SUBSCRIPTION_STATE?.put) {
     return finish({ action: "keep", reason: "state-store-not-configured" });
   }

@@ -43,13 +43,22 @@ class MemoryD1 {
           },
           first: async () => {
             const row = this.snapshots
-              .filter((item) => item[0] === values[0])
+              .filter((item) => item[0] === values[0] && (!sql.includes("source_content_hash = ?") || item[2] === values[1]))
               .sort((left, right) => String(right[1]).localeCompare(String(left[1])))[0];
             if (!row) return null;
+            if (sql.includes("source_content_hash = ?")) {
+              return { id: this.snapshots.indexOf(row) + 1, captured_at: row[1], source_content_hash: row[2], valid_count: row[3], nodes_json: row[4] };
+            }
             return sql.trimStart().startsWith("SELECT captured_at")
               ? { captured_at: row[1], valid_count: row[3] }
               : { nodes_json: row[4] };
-          }
+          },
+          all: async () => ({
+            results: this.snapshots
+              .filter((item) => item[0] === values[0])
+              .sort((left, right) => String(right[1]).localeCompare(String(left[1])))
+              .map((row) => ({ id: this.snapshots.indexOf(row) + 1, captured_at: row[1], source_content_hash: row[2], valid_count: row[3] }))
+          })
         };
       }
     };
@@ -228,6 +237,9 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(pageText, /Clash \/ Mihomo 分流配置/);
   assert.match(pageText, /Rule Providers|rule-providers/);
   assert.match(pageText, /上传并保存历史源/);
+  assert.match(pageText, /历史内容版本/);
+  assert.match(pageText, /使用此版本/);
+  assert.match(pageText, /同时暂停自动更新/);
   assert.match(pageText, /已过期的旧汇总地址/);
   assert.match(pageText, /expiredName/);
   assert.doesNotMatch(pageText, /固定链接路径 Token/);
@@ -304,6 +316,33 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.equal(audit.snapshots.length, 1);
   const importedState = JSON.parse(await state.get("published-state-v1:工作一"));
   assert.match(importedState.output, /rule-providers/);
+
+  const secondImportResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/import", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ id: "工作一", content: validSource.replace("one.example.com", "two.example.com") })
+  }), env);
+  assert.equal(secondImportResponse.status, 200);
+  assert.equal(audit.snapshots.length, 2);
+  const historyRead = await worker.fetch(new Request("https://worker.example.com/api/admin/subscriptions", { headers }), env);
+  const historyBody = await historyRead.json();
+  assert.equal(historyBody.subscriptions[0].historyVersions.length, 2);
+  assert.notEqual(historyBody.subscriptions[0].historyVersions[0].sourceContentHash, historyBody.subscriptions[0].historyVersions[1].sourceContentHash);
+  const currentSourceHash = JSON.parse(await state.get("published-state-v1:工作一")).sourceContentHash;
+  const olderVersion = historyBody.subscriptions[0].historyVersions.find((version) => version.sourceContentHash !== currentSourceHash)
+    ?? historyBody.subscriptions[0].historyVersions[1];
+  const useHistoryResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/history/use", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ id: "工作一", sourceContentHash: olderVersion.sourceContentHash, pauseUpdates: true })
+  }), env);
+  assert.equal(useHistoryResponse.status, 200);
+  const useHistoryBody = await useHistoryResponse.json();
+  assert.equal(useHistoryBody.paused, true);
+  assert.match(JSON.parse(await state.get("published-state-v1:工作一")).output, /one\.example\.com/);
+  const pausedRefresh = await worker.fetch(new Request("https://worker.example.com/api/admin/refresh", { method: "POST", headers }), env);
+  assert.equal(pausedRefresh.status, 200);
+  assert.equal((await pausedRefresh.json()).results[0].reason, "paused");
 
   const expiredResponse = await worker.fetch(new Request("https://worker.example.com/sub/old-aggregate-token-123456"), env);
   assert.equal(expiredResponse.status, 200);
