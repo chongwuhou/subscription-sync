@@ -288,11 +288,12 @@ const ADMIN_HTML = `<!doctype html>
         };
         card.appendChild(copyLink);
         addField(card, "minValidNodes", "最低有效节点数", profile.minValidNodes || 1, "number");
-        addField(card, "nodeNameInclude", "节点名称保留（可选；多个关键词用 | 分隔，例如：美国|VIP2）", profile.nodeNameInclude || "", "text", "留空表示不限制");
+        addField(card, "nodeNameInclude", "节点名称保留（或；多个关键词用 | 分隔，例如：美国|VIP2）", profile.nodeNameInclude || "", "text", "命中任一关键词，留空表示不限制");
+        addField(card, "nodeNameIncludeAll", "节点名称同时包含（且；多个关键词用 | 分隔，例如：美国|VIP2）", profile.nodeNameIncludeAll || "", "text", "必须同时命中全部关键词，留空表示不限制");
         addField(card, "nodeNameExclude", "节点名称排除（可选；多个关键词用 | 分隔，例如：到期|续费）", profile.nodeNameExclude || "", "text", "留空表示不排除");
         const filterHelp = document.createElement("p");
         filterHelp.className = "muted";
-        filterHelp.textContent = "处理顺序：先按原始节点名称过滤，再执行改名规则；关键词是不区分大小写的名称包含匹配。两项都留空就是不过滤。";
+        filterHelp.textContent = "处理顺序：先按原始节点名称过滤，再执行改名规则；“或”命中任一，“且”必须全部命中，排除命中任一就排除；关键词是不区分大小写的名称包含匹配。三项都留空就是不过滤。";
         card.appendChild(filterHelp);
         addField(card, "defaultTarget", "无法识别客户端时的格式（clash/base64/sing-box/links）", profile.defaultTarget || "clash", "text", "clash");
         addCheckbox(card, "replaceAllFields", "允许替换节点全部字段（高级；默认只替换名称）", profile.replaceAllFields);
@@ -300,10 +301,11 @@ const ADMIN_HTML = `<!doctype html>
         const help = document.createElement("details");
         help.className = "rules-help";
         const helpText = [
-          '[{"pattern":"联通优选","replacement":"HK"},{"pattern":"Mbps","replacement":"1"}]'
+          '[{"pattern":"联通优选","replacement":"HK"},{"pattern":"Mbps","replacement":"1"}]',
+          '[{"pattern":"(?:网址|网站)[:：]?nnbin\\\\.com","replacement":""}]'
         ].join("\\n");
         help.innerHTML = '<summary>一行规则示例</summary>' +
-          '<p class="muted">多个规则放在同一个数组中，按顺序执行；粘贴多个数组也会自动合并。默认只改名称。</p>' +
+          '<p class="muted">多个规则放在同一个数组中，按顺序执行；粘贴多个数组也会自动合并。pattern 是 JavaScript 正则；默认只改名称，替换服务器/SNI 等字段请勾选高级选项。</p>' +
           '<pre><code>' + helpText + '</code></pre>';
         card.appendChild(help);
         const previewButton = document.createElement("button");
@@ -318,8 +320,9 @@ const ADMIN_HTML = `<!doctype html>
             const renameRules = parseRenameRulesInput(card.querySelector("[data-field='renameRules']").value, index);
             const replaceAllFields = card.querySelector("[data-field='replaceAllFields']").checked;
             const nodeNameInclude = card.querySelector("[data-field='nodeNameInclude']").value;
+            const nodeNameIncludeAll = card.querySelector("[data-field='nodeNameIncludeAll']").value;
             const nodeNameExclude = card.querySelector("[data-field='nodeNameExclude']").value;
-            const data = await api("/api/admin/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.id, renameRules, replaceAllFields, nodeNameInclude, nodeNameExclude }) });
+            const data = await api("/api/admin/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.id, renameRules, replaceAllFields, nodeNameInclude, nodeNameIncludeAll, nodeNameExclude }) });
             renderPreviewPane(previewGrid, "原版", data.original || []);
             renderPreviewPane(previewGrid, "规则修改后", data.modified || []);
             setStatus((data.source === "history" ? "源头暂不可用，已使用 D1 历史快照" : "已读取当前源头") + "加载预览；默认只替换名称。需要长期生效请点击“保存本订阅”或“保存订阅配置”");
@@ -363,6 +366,7 @@ const ADMIN_HTML = `<!doctype html>
           publicToken,
           replaceAllFields: checked("replaceAllFields"),
           nodeNameInclude: value("nodeNameInclude").trim(),
+          nodeNameIncludeAll: value("nodeNameIncludeAll").trim(),
           nodeNameExclude: value("nodeNameExclude").trim(),
           minValidNodes: Number(value("minValidNodes")),
           defaultTarget: value("defaultTarget").trim(),
@@ -392,7 +396,7 @@ const ADMIN_HTML = `<!doctype html>
     };
     document.getElementById("reload").onclick = load;
     document.getElementById("add").onclick = () => {
-      state.profiles.push({ id: "", name: "", sourceUrl: "", publicToken: "", nodeNameInclude: "", nodeNameExclude: "", replaceAllFields: false, minValidNodes: 1, defaultTarget: "clash", renameRules: [] });
+      state.profiles.push({ id: "", name: "", sourceUrl: "", publicToken: "", nodeNameInclude: "", nodeNameIncludeAll: "", nodeNameExclude: "", replaceAllFields: false, minValidNodes: 1, defaultTarget: "clash", renameRules: [] });
       render();
     };
     async function saveAll(focusIndex = null) {
@@ -702,6 +706,7 @@ async function handleAdminApi(request, env, url) {
       const candidate = await buildCandidate(content, {
         renameRules: profile.renameRules,
         nodeNameInclude: profile.nodeNameInclude,
+        nodeNameIncludeAll: profile.nodeNameIncludeAll,
         nodeNameExclude: profile.nodeNameExclude,
         replaceAllFields: profile.replaceAllFields,
         minValidNodes: profile.minValidNodes,
@@ -761,12 +766,13 @@ async function handleAdminApi(request, env, url) {
       const renameRules = Array.isArray(body?.renameRules) ? body.renameRules : profile.renameRules;
       const replaceAllFields = typeof body?.replaceAllFields === "boolean" ? body.replaceAllFields : profile.replaceAllFields;
       const nodeNameInclude = typeof body?.nodeNameInclude === "string" ? body.nodeNameInclude : profile.nodeNameInclude;
+      const nodeNameIncludeAll = typeof body?.nodeNameIncludeAll === "string" ? body.nodeNameIncludeAll : profile.nodeNameIncludeAll;
       const nodeNameExclude = typeof body?.nodeNameExclude === "string" ? body.nodeNameExclude : profile.nodeNameExclude;
       let preview;
       let source = "live";
       try {
         const rawText = await fetchSource(env, profile);
-        preview = buildPreview(rawText, { renameRules, replaceAllFields, nodeNameInclude, nodeNameExclude });
+        preview = buildPreview(rawText, { renameRules, replaceAllFields, nodeNameInclude, nodeNameIncludeAll, nodeNameExclude });
         if (preview.original.length === 0 || preview.modified.length === 0) throw new Error("latest-source-has-no-valid-nodes");
       } catch (liveError) {
         const historicalNodes = await loadLatestSourceSnapshot(env, profile.id);
@@ -777,7 +783,7 @@ async function handleAdminApi(request, env, url) {
             ? state.sourceNodes
             : state?.nodes;
         if (!fallbackNodes?.length) throw liveError;
-        preview = buildPreviewFromNodes(fallbackNodes, { renameRules, replaceAllFields, nodeNameInclude, nodeNameExclude });
+        preview = buildPreviewFromNodes(fallbackNodes, { renameRules, replaceAllFields, nodeNameInclude, nodeNameIncludeAll, nodeNameExclude });
         if (preview.original.length === 0 || preview.modified.length === 0) throw liveError;
         source = "history";
       }
@@ -929,6 +935,7 @@ async function reprocessStoredProfile(env, profile, now, settings, previous = nu
     const candidate = await buildCandidateFromNodes(historicalNodes, {
       renameRules: profile.renameRules,
       nodeNameInclude: profile.nodeNameInclude,
+      nodeNameIncludeAll: profile.nodeNameIncludeAll,
       nodeNameExclude: profile.nodeNameExclude,
       replaceAllFields: profile.replaceAllFields,
       minValidNodes: profile.minValidNodes,
@@ -989,6 +996,7 @@ async function refreshProfile(env, profile, now, settings = null) {
     candidate = await buildCandidate(rawText, {
       renameRules: profile.renameRules,
       nodeNameInclude: profile.nodeNameInclude,
+      nodeNameIncludeAll: profile.nodeNameIncludeAll,
       nodeNameExclude: profile.nodeNameExclude,
       replaceAllFields: profile.replaceAllFields,
       minValidNodes: profile.minValidNodes,

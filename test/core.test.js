@@ -77,6 +77,38 @@ proxies:
   assert.doesNotMatch(candidate.output, /expired\.example\.com|jp\.example\.com/);
 });
 
+test("supports OR and AND node-name filters and flexible website cleanup", async () => {
+  const candidate = await buildCandidate(`
+proxies:
+  - name: 美国 VIP2 网站:nnbin.com
+    type: anytls
+    server: us1.example.com
+    port: 443
+    password: one
+  - name: 美国 VIP1 网址:nnbin.com
+    type: anytls
+    server: us2.example.com
+    port: 443
+    password: two
+  - name: 美国 普通节点
+    type: anytls
+    server: us3.example.com
+    port: 443
+    password: three
+  - name: 日本 VIP2
+    type: anytls
+    server: jp.example.com
+    port: 443
+    password: four
+`, {
+    nodeNameInclude: "美国|日本",
+    nodeNameIncludeAll: "美国|VIP",
+    renameRules: [{ pattern: "(?:网址|网站)[:：]?nnbin\\.com", replacement: "" }]
+  });
+  assert.equal(candidate.validCount, 2);
+  assert.deepEqual(candidate.nodes.map((node) => node.name), ["美国 VIP1", "美国 VIP2"]);
+});
+
 test("builds an original and renamed preview without dropping valid nodes", () => {
   const preview = buildPreview(sampleClash, {
     renameRules: [{ pattern: "\\s*\\|\\s*", replacement: "-" }]

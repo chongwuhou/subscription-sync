@@ -54,6 +54,7 @@ npm run check
 - `SOURCE_URL`：原始订阅地址，必须是 `https://`；确实需要 HTTP 时必须显式设置 `ALLOW_HTTP_SOURCE=true`。
 - `PUBLIC_PATH_TOKEN`：固定通用链接中的随机路径片段。
 - `INCLUDE_NODE_NAMES` / `EXCLUDE_NODE_NAMES`：可选的节点名称包含/排除关键词，多个关键词用 `|`、逗号或换行分隔；先过滤原始名称，再执行改名。
+- `INCLUDE_NODE_NAMES_ALL`：可选的节点名称“且”过滤，多个关键词必须全部命中。
 - `RENAME_RULES_JSON`：例如 `[{"pattern":"\\s+\\|\\s+","replacement":"-"}]`。
 - `MIN_VALID_NODES`：最低有效节点数，默认 1。
 - `DEFAULT_TARGET`：无法从 User-Agent 判断时的默认输出格式，默认 `clash`。
@@ -70,6 +71,7 @@ npm run check
     "sourceUrl": "https://provider.example/sub?token=REDACTED",
     "publicToken": "main-random-token",
     "nodeNameInclude": "美国|VIP2",
+    "nodeNameIncludeAll": "美国|VIP",
     "nodeNameExclude": "到期|续费",
     "renameRules": [{"pattern": "\\s+\\|\\s+", "replacement": "-"}],
     "minValidNodes": 1,
@@ -124,7 +126,7 @@ Clash 分流配置示例（后台的折叠项中填写）：
 `[{"pattern":"香港","replacement":"HK"},{"pattern":"新加坡","replacement":"SG"}]`。
 保存后配置写入 Cloudflare KV，重新打开后台仍会保留；6 小时和 24 小时分别填写 `360` 和 `1440` 分钟。
 
-节点过滤在改名规则之前执行：例如保留 `美国|VIP2`，排除 `到期|续费`；两项都留空就是不过滤。过滤后有效节点不足最低数量时不会覆盖旧订阅，但未过滤的有效源节点仍会保存到 D1 历史快照，方便之后调整过滤条件重新处理。
+节点过滤在改名规则之前执行：`美国|VIP2` 是“或”，`美国|VIP` 放在“且”字段表示必须同时包含两个关键词，排除 `到期|续费` 命中任一就排除。三项都留空就是不过滤。过滤后有效节点不足最低数量时不会覆盖旧订阅，但未过滤的有效源节点仍会保存到 D1 历史快照，方便之后调整过滤条件重新处理。
 
 `wrangler.toml.example` 是不绑定账号资源的公开模板；生产 `wrangler.toml` 只记录资源 ID，真实地址、Token 和规则仍放在 Cloudflare 私有配置中。
 

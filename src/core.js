@@ -49,8 +49,10 @@ function filterTerms(value) {
 function matchesNodeNameFilter(name, options = {}) {
   const normalizedName = String(name ?? "").toLocaleLowerCase();
   const include = filterTerms(options.nodeNameInclude).map((item) => item.toLocaleLowerCase());
+  const includeAll = filterTerms(options.nodeNameIncludeAll).map((item) => item.toLocaleLowerCase());
   const exclude = filterTerms(options.nodeNameExclude).map((item) => item.toLocaleLowerCase());
   if (include.length > 0 && !include.some((term) => normalizedName.includes(term))) return false;
+  if (includeAll.some((term) => !normalizedName.includes(term))) return false;
   if (exclude.some((term) => normalizedName.includes(term))) return false;
   return true;
 }
