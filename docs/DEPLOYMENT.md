@@ -12,6 +12,25 @@
 
 D1 是可选项。启用 `SUBSCRIPTION_AUDIT` 后，运行 `migrations/0001_audit.sql`，它只保存刷新时间、动作、原因、有效节点数和内容哈希，不保存原始订阅地址、Token 或生成的订阅正文。
 
+## 多订阅配置
+
+多订阅时使用一个私有的 `SUBSCRIPTIONS_JSON`，每个元素对应一个独立的源和固定链接：
+
+```json
+[
+  {
+    "id": "main",
+    "name": "主订阅",
+    "sourceUrl": "https://provider.example/sub?token=REDACTED",
+    "publicToken": "main-random-token",
+    "renameRules": [],
+    "minValidNodes": 1
+  }
+]
+```
+
+Worker 为每个 `id` 使用独立的 KV key：`published-state-v1:<id>`，公开链接格式为 `/sub/<publicToken>`。一个源失败、无有效节点或没有变化时，不会覆盖其他源。
+
 ## 私有配置
 
 不要把下列值写进公开仓库：
@@ -31,7 +50,7 @@ D1 是可选项。启用 `SUBSCRIPTION_AUDIT` 后，运行 `migrations/0001_audi
 
 Cron 触发器执行刷新：
 
-1. Worker 读取私有 `SOURCE_URL`。
+1. Worker 读取私有 `SOURCE_URL`，或读取多订阅的 `SUBSCRIPTIONS_JSON`。
 2. 解析、重命名、去重、排序并验证节点。
 3. 没有有效节点时保留 KV 中的最后成功版本。
 4. 内容哈希不变时不写 KV。
