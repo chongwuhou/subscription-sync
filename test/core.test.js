@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCandidate, decidePublication } from "../src/core.js";
+import { buildCandidate, buildPreview, decidePublication } from "../src/core.js";
 import { decodeSubscription, parseShareLink } from "../src/codec.js";
 import { detectTarget, renderSubscription } from "../src/formats.js";
 
@@ -29,6 +29,17 @@ test("parses Clash YAML and keeps only structurally valid nodes", async () => {
   assert.equal(candidate.validCount, 1);
   assert.equal(candidate.nodes[0].name, "US-Alpha");
   assert.match(candidate.output, /proxy-groups:/);
+});
+
+test("builds an original and renamed preview without dropping valid nodes", () => {
+  const preview = buildPreview(sampleClash, {
+    renameRules: [{ pattern: "\\s*\\|\\s*", replacement: "-" }]
+  });
+  assert.equal(preview.original.length, 1);
+  assert.equal(preview.modified.length, 1);
+  assert.equal(preview.original[0].name, "US | Alpha");
+  assert.equal(preview.modified[0].name, "US-Alpha");
+  assert.equal(preview.original[0].uuid, preview.modified[0].uuid);
 });
 
 test("unchanged content is not republished", async () => {
