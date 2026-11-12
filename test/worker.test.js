@@ -23,15 +23,32 @@ class MemoryKV {
 class MemoryD1 {
   constructor() {
     this.rows = [];
+    this.snapshots = [];
   }
 
-  prepare() {
+  prepare(sql) {
     return {
-      bind: (...values) => ({
-        run: async () => {
-          this.rows.push(values);
-        }
-      })
+      bind: (...values) => {
+        const isSnapshot = sql.includes("source_snapshots");
+        return {
+          run: async () => {
+            if (/^CREATE TABLE/i.test(sql)) {
+              return;
+            }
+            if (isSnapshot) {
+              if (!this.snapshots.some((row) => row[0] === values[0] && row[2] === values[2])) this.snapshots.push(values);
+            } else {
+              this.rows.push(values);
+            }
+          },
+          first: async () => {
+            const row = this.snapshots
+              .filter((item) => item[0] === values[0])
+              .sort((left, right) => String(right[1]).localeCompare(String(left[1])))[0];
+            return row ? { nodes_json: row[4] } : null;
+          }
+        };
+      }
     };
   }
 }
@@ -77,15 +94,46 @@ test("Worker refresh publishes only changed valid content", async () => {
     source = invalidSource;
     const invalid = await refresh(env, new Date("2026-11-12T00:02:00.000Z"));
     assert.equal(invalid.action, "keep");
-    assert.equal(invalid.reason, "no-valid-nodes");
+    assert.equal(invalid.reason, "latest-invalid-use-last-good");
 
     const published = JSON.parse(await state.get("published-state-v1:default"));
     assert.equal(published.validCount, 1);
     assert.match(published.output, /US-One/);
     assert.equal(audit.rows.length, 3);
+    assert.equal(audit.snapshots.length, 1);
     assert.equal(audit.rows[0][0], "default");
     assert.equal(audit.rows[0][1], "2026-11-12T00:00:00.000Z");
     assert.equal(audit.rows[2][2], "keep");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("reprocesses the latest D1 source snapshot when the source is unavailable", async () => {
+  const originalFetch = globalThis.fetch;
+  const state = new MemoryKV();
+  const audit = new MemoryD1();
+  const env = {
+    SOURCE_URL: "https://source.example.com/intermittent",
+    PUBLIC_PATH_TOKEN: "snapshot-token",
+    SUBSCRIPTION_STATE: state,
+    SUBSCRIPTION_AUDIT: audit,
+    RENAME_RULES_JSON: JSON.stringify([{ pattern: "\\s*\\|\\s*", replacement: "-" }])
+  };
+  globalThis.fetch = async () => new Response(validSource, { status: 200 });
+  try {
+    const first = await refresh(env, new Date("2026-11-12T00:00:00.000Z"));
+    assert.equal(first.action, "initialize");
+    assert.equal(audit.snapshots.length, 1);
+
+    env.RENAME_RULES_JSON = JSON.stringify([{ pattern: "US", replacement: "United States" }]);
+    globalThis.fetch = async () => { throw new Error("source window closed"); };
+    const fallback = await refresh(env, new Date("2026-11-12T00:06:00.000Z"));
+    assert.equal(fallback.action, "update");
+    assert.equal(fallback.reason, "source-unavailable-use-last-good");
+    const published = JSON.parse(await state.get("published-state-v1:default"));
+    assert.match(published.output, /United States \| One/);
+    assert.equal(audit.snapshots.length, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
