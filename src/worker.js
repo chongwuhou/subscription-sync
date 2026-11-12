@@ -97,19 +97,19 @@ const ADMIN_HTML = `<!doctype html>
         addField(card, "renameRules", "改名规则 JSON", JSON.stringify(profile.renameRules || [], null, 2), "textarea", '[{"pattern":"\\\\s*\\\\|\\\\s*","replacement":"-"}]');
         const help = document.createElement("details");
         help.className = "rules-help";
+        const helpText = [
+          "1. 把 US | New York 变成 US-New York",
+          '[{"pattern":"\\\\s*\\\\|\\\\s*","replacement":"-"}]',
+          "",
+          "2. 把地区名称统一改名",
+          '[{"pattern":"香港","replacement":"HK"},{"pattern":"新加坡","replacement":"SG"}]',
+          "",
+          "3. 删除名称开头的机场标签",
+          '[{"pattern":"^\\\\s*机场[-_ ]*","replacement":""}]'
+        ].join("\\n");
         help.innerHTML = '<summary>改名/替换规则案例（复制到上面的 JSON 框）</summary>' +
           '<p class="muted">pattern 是 JavaScript 正则表达式；replacement 是替换后的文字；多个规则会按顺序执行。</p>' +
-          '<pre><code>1. 把 “US | New York” 变成 “US-New York”
-[{"pattern":"\\s*\\|\\s*","replacement":"-"}]
-
-2. 删除节点名前后的中括号
-[{"pattern":"[\\[\\]]","replacement":""}]
-
-3. 把地区名称统一改名
-[{"pattern":"香港","replacement":"HK"},{"pattern":"新加坡","replacement":"SG"}]
-
-4. 删除名称开头的机场标签
-[{"pattern":"^\\s*机场[-_ ]*","replacement":""}]</code></pre>';
+          '<pre><code>' + helpText + '</code></pre>';
         card.appendChild(help);
         const saveOne = document.createElement("button");
         saveOne.type = "button";
