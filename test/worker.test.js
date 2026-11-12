@@ -169,7 +169,7 @@ test("admin API manages subscriptions and refresh interval without public access
         name: "主订阅",
         sourceUrl: "https://source.example.com/sub?token=REDACTED",
         renameRules: [{ pattern: "\\s+\\|\\s+", replacement: "-" }],
-        minValidNodes: 2,
+        minValidNodes: 1,
         defaultTarget: "base64"
       }]
     })
@@ -188,7 +188,34 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.equal(body.managed, true);
   assert.equal(body.subscriptions[0].sourceUrl, "https://source.example.com/sub?token=REDACTED");
   assert.match(body.subscriptions[0].publicToken, /^[A-Za-z0-9_-]{24,64}$/);
-  assert.equal(body.subscriptions[0].minValidNodes, 2);
+  assert.equal(body.subscriptions[0].minValidNodes, 1);
   assert.equal(body.refreshIntervalMinutes, 15);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(validSource, { status: 200 });
+  try {
+    const previewResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/preview", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ id: "main" })
+    }), env);
+    assert.equal(previewResponse.status, 200);
+    const preview = await previewResponse.json();
+    assert.equal(preview.original[0].name, "US | One");
+    assert.equal(preview.modified[0].name, "US-One");
+    assert.equal(Object.hasOwn(preview.original[0], "uuid"), false);
+    assert.equal(Object.hasOwn(preview.modified[0], "uuid"), false);
+
+    const refreshResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/refresh", {
+      method: "POST",
+      headers
+    }), env);
+    assert.equal(refreshResponse.status, 200);
+    const refreshBody = await refreshResponse.json();
+    assert.equal(Object.hasOwn(refreshBody.results[0], "nodes"), false);
+    assert.equal(Object.hasOwn(refreshBody.results[0], "output"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
