@@ -1,4 +1,4 @@
-import { buildAggregateCandidate, buildCandidate, buildCandidateFromNodes, buildPreview, decidePublication } from "./core.js";
+import { buildAggregateCandidate, buildCandidate, buildCandidateFromNodes, buildPreview, buildPreviewFromNodes, decidePublication } from "./core.js";
 import {
   parseSubscriptionProfiles,
   parseSubscriptionProfilesJson,
@@ -238,6 +238,10 @@ const ADMIN_HTML = `<!doctype html>
         uploadInput.type = "file";
         uploadInput.accept = ".yaml,.yml,.txt,text/yaml,application/yaml,text/plain";
         uploadLabel.appendChild(uploadInput);
+        const uploadName = document.createElement("span");
+        uploadName.className = "muted";
+        uploadInput.onchange = () => { uploadName.textContent = uploadInput.files?.[0]?.name ? " 已选择：" + uploadInput.files[0].name : ""; };
+        uploadLabel.appendChild(uploadName);
         card.appendChild(uploadLabel);
         const uploadButton = document.createElement("button");
         uploadButton.type = "button";
@@ -254,12 +258,18 @@ const ADMIN_HTML = `<!doctype html>
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ id: profile.id, content })
             });
-            setStatus("已上传并保存订阅 " + profile.id + " 的历史有效源，共 " + data.validCount + " 个节点；源站不可用时会自动使用。");
             await load();
+            setStatus("已上传并绑定订阅 " + profile.id + " 的历史有效源，共 " + data.validCount + " 个节点；源站不可用时会自动使用。");
           } catch (error) { setStatus(error.message); }
           finally { uploadButton.disabled = false; }
         };
         card.appendChild(uploadButton);
+        if (profile.capturedAt) {
+          const historyNote = document.createElement("p");
+          historyNote.className = "muted";
+          historyNote.textContent = "已绑定历史源：" + (profile.validCount || 0) + " 个有效节点，保存于 " + new Date(profile.capturedAt).toLocaleString();
+          card.appendChild(historyNote);
+        }
         const publicLinkInput = addField(card, "publicLink", "修改后的通用订阅地址（可修改 /sub/ 后面的路径）", publicLinkFor(profile.publicToken), "url", location.origin + "/sub/保存后自动生成");
         const copyLink = document.createElement("button");
         copyLink.type = "button";
@@ -304,7 +314,7 @@ const ADMIN_HTML = `<!doctype html>
             const data = await api("/api/admin/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.id, renameRules, replaceAllFields }) });
             renderPreviewPane(previewGrid, "原版", data.original || []);
             renderPreviewPane(previewGrid, "规则修改后", data.modified || []);
-            setStatus("已按当前规则加载预览；默认只替换名称。需要长期生效请点击“保存本订阅”或“保存订阅配置”");
+            setStatus((data.source === "history" ? "源头暂不可用，已使用 D1 历史快照" : "已读取当前源头") + "加载预览；默认只替换名称。需要长期生效请点击“保存本订阅”或“保存订阅配置”");
           } catch (error) { setStatus(error.message); }
           finally { previewButton.disabled = false; }
         };
@@ -620,9 +630,13 @@ async function handleAdminApi(request, env, url) {
     const current = await storedProfiles(env);
     const settings = await loadSettings(env);
     const aggregatePublicToken = await ensureAggregateToken(env);
+    const subscriptions = await Promise.all(current.profiles.map(async (profile) => ({
+      ...profile,
+      ...(await loadLatestSourceSnapshotMeta(env, profile.id) ?? {})
+    })));
     return json({
       managed: current.managed,
-      subscriptions: current.profiles,
+      subscriptions,
       aggregatePublicToken,
       refreshIntervalMinutes: settings.refreshIntervalMinutes,
       clashConfig: settings.clashConfig
@@ -717,12 +731,24 @@ async function handleAdminApi(request, env, url) {
       const id = String(body?.id ?? "").trim();
       const profile = (await loadProfiles(env)).find((item) => item.id === id);
       if (!profile) return json({ error: "subscription-not-found" }, 404);
-      const rawText = await fetchSource(env, profile);
       const renameRules = Array.isArray(body?.renameRules) ? body.renameRules : profile.renameRules;
       const replaceAllFields = typeof body?.replaceAllFields === "boolean" ? body.replaceAllFields : profile.replaceAllFields;
-      const preview = buildPreview(rawText, { renameRules, replaceAllFields });
+      let preview;
+      let source = "live";
+      try {
+        const rawText = await fetchSource(env, profile);
+        preview = buildPreview(rawText, { renameRules, replaceAllFields });
+        if (preview.original.length === 0 || preview.modified.length === 0) throw new Error("latest-source-has-no-valid-nodes");
+      } catch (liveError) {
+        const historicalNodes = await loadLatestSourceSnapshot(env, profile.id);
+        if (!historicalNodes?.length) throw liveError;
+        preview = buildPreviewFromNodes(historicalNodes, { renameRules, replaceAllFields });
+        if (preview.original.length === 0 || preview.modified.length === 0) throw liveError;
+        source = "history";
+      }
       return json({
         subscriptionId: profile.id,
+        source,
         original: preview.original.map(previewNode),
         modified: preview.modified.map(previewNode)
       });
@@ -792,6 +818,21 @@ async function loadLatestSourceSnapshot(env, profileId) {
     if (!result?.nodes_json) return null;
     const nodes = JSON.parse(result.nodes_json);
     return Array.isArray(nodes) ? nodes : null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadLatestSourceSnapshotMeta(env, profileId) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare) return null;
+  try {
+    if (!await ensureSourceSnapshotSchema(env)) return null;
+    const result = await env.SUBSCRIPTION_AUDIT
+      .prepare("SELECT captured_at, valid_count FROM source_snapshots WHERE subscription_id = ? ORDER BY captured_at DESC, id DESC LIMIT 1")
+      .bind(profileId)
+      .first();
+    if (!result) return null;
+    return { capturedAt: String(result.captured_at ?? ""), validCount: Number(result.valid_count ?? 0) };
   } catch {
     return null;
   }
