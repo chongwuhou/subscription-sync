@@ -176,7 +176,7 @@ test("admin API manages subscriptions and refresh interval without public access
     headers,
     body: JSON.stringify({
       subscriptions: [{
-        id: "main",
+        id: "工作一",
         name: "主订阅",
         sourceUrl: "https://source.example.com/sub?token=REDACTED",
         renameRules: [],
@@ -210,7 +210,7 @@ test("admin API manages subscriptions and refresh interval without public access
     const previewResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/preview", {
       method: "POST",
       headers,
-      body: JSON.stringify({ id: "main", renameRules: [[{ pattern: "\\s+\\|\\s+", replacement: "-" }], [{ pattern: "One", replacement: "1" }]], replaceAllFields: false })
+      body: JSON.stringify({ id: "工作一", renameRules: [[{ pattern: "\\s+\\|\\s+", replacement: "-" }], [{ pattern: "One", replacement: "1" }]], replaceAllFields: false })
     }), env);
     assert.equal(previewResponse.status, 200);
     const preview = await previewResponse.json();
@@ -223,7 +223,7 @@ test("admin API manages subscriptions and refresh interval without public access
     const allFieldsPreviewResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/preview", {
       method: "POST",
       headers,
-      body: JSON.stringify({ id: "main", renameRules: [{ pattern: "one", replacement: "two", flags: "gi" }], replaceAllFields: true })
+      body: JSON.stringify({ id: "工作一", renameRules: [{ pattern: "one", replacement: "two", flags: "gi" }], replaceAllFields: true })
     }), env);
     assert.equal(allFieldsPreviewResponse.status, 200);
     const allFieldsPreview = await allFieldsPreviewResponse.json();
