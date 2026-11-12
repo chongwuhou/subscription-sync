@@ -16,7 +16,7 @@ id = "replace-with-an-approved-kv-namespace-id"
 [triggers]
 # The Worker fetches the source on a schedule. Public requests only serve the
 # last good version from KV.
-crons = ["*/30 * * * *"]
+crons = ["*/5 * * * *"]
 
 # Optional: enable this binding when an audit history is desired. The SQL
 # migration stores no source URL, Token, or generated subscription body.
