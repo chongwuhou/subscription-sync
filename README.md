@@ -23,13 +23,14 @@
 - MIT License。
 - 运行时代码没有遥测、广告、远程代码加载或隐藏管理入口。
 - 没有依赖安装也可以运行核心测试；当前运行时依赖只有 JavaScript 标准能力。
-- Cloudflare 配置只是示例，不会自动创建 Worker、KV 或任何账号资源。
+- `wrangler.toml` 只包含 Worker、KV 和 D1 的公开绑定配置，不包含订阅地址、Token 或密钥。
+- 部署构建变量已关闭 Wrangler 匿名遥测，预览 URL 已关闭。
 - 真实的 `SOURCE_URL`、公开链接 Token 和重命名规则必须放在私有环境变量中。
 - 详细设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 和 [SECURITY.md](SECURITY.md)。
 
 ## 项目状态
 
-当前还没有填写真实订阅地址，也没有发布 Worker。公开源码、核心逻辑和测试已经完成；Cloudflare 账户中已预留名为 `subscription-sync-state` 的 KV 和 `subscription-sync-audit` 的 D1，Worker 接入 GitHub 仍需在已登录的 Cloudflare/GitHub 会话中完成授权。
+当前还没有填写真实订阅地址。Worker 已通过 GitHub 自动部署到 `https://subscription-sync.chongwuhou.workers.dev`，并绑定 `subscription-sync-state` KV、`subscription-sync-audit` D1 和每 30 分钟 Cron；健康检查会返回未配置状态，不会主动抓取任何地址。
 
 ## 本地检查
 
@@ -74,7 +75,7 @@ npm run check
 
 自动刷新和 Cloudflare 配置说明见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
-`wrangler.toml.example` 只作为公开配置模板，不包含真实地址、Token 或命名空间 ID。
+`wrangler.toml.example` 是不绑定账号资源的公开模板；生产 `wrangler.toml` 只记录资源 ID，真实地址、Token 和规则仍放在 Cloudflare 私有配置中。
 
 ## 后续接入前的验收标准
 
