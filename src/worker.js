@@ -1388,6 +1388,44 @@ async function loadSettings(env) {
   };
 }
 
+async function readPublicKvJson(env, key) {
+  if (!env.SUBSCRIPTION_STATE?.get) return null;
+  const stored = await env.SUBSCRIPTION_STATE.get(key);
+  if (stored === null) return null;
+  try { return JSON.parse(stored); } catch { return null; }
+}
+
+async function loadPublicRouteConfig(env) {
+  const [profilesValue, aggregateValue, expiredValue, distributionValue, settingsValue] = await Promise.all([
+    readPublicKvJson(env, ADMIN_CONFIG_KEY),
+    readPublicKvJson(env, AGGREGATE_PUBLIC_TOKEN_KEY),
+    readPublicKvJson(env, ADMIN_EXPIRED_KEY),
+    readPublicKvJson(env, ADMIN_DISTRIBUTION_KEY),
+    readPublicKvJson(env, ADMIN_SETTINGS_KEY)
+  ]);
+  const profiles = Array.isArray(profilesValue)
+    ? parseSubscriptionProfilesJson(JSON.stringify(profilesValue))
+    : await loadProfiles(env);
+  const aggregatePublicToken = typeof aggregateValue === "string"
+    ? aggregateValue
+    : String(aggregateValue?.publicToken ?? "").trim() || await loadAggregateToken(env);
+  const expiredSubscription = expiredValue && typeof expiredValue === "object"
+    ? normalizeExpiredSubscription(expiredValue)
+    : await loadExpiredSubscription(env);
+  const distributionSubscriptions = Array.isArray(distributionValue)
+    ? normalizeDistributionSubscriptions(distributionValue)
+    : await loadDistributionSubscriptions(env);
+  const settings = settingsValue && typeof settingsValue === "object"
+    ? {
+      refreshIntervalMinutes: normalizeRefreshInterval(settingsValue.refreshIntervalMinutes ?? env.REFRESH_INTERVAL_MINUTES),
+      clashConfig: normalizeAutomaticClashConfig(settingsValue.clashConfig ?? env.CLASH_CONFIG_JSON),
+      aggregateCustomNodes: normalizeAggregateCustomNodes(settingsValue.aggregateCustomNodes ?? env.AGGREGATE_CUSTOM_NODES),
+      aggregateCustomNodePosition: normalizeAggregateCustomNodePosition(settingsValue.aggregateCustomNodePosition ?? env.AGGREGATE_CUSTOM_NODE_POSITION)
+    }
+    : await loadSettings(env);
+  return { profiles, aggregatePublicToken, expiredSubscription, distributionSubscriptions, settings };
+}
+
 async function scheduledRefreshDue(env, now) {
   const settings = await loadSettings(env);
   if (!env.SUBSCRIPTION_STATE?.get || !env.SUBSCRIPTION_STATE?.put) return { due: true, settings };
@@ -2284,13 +2322,13 @@ function responseFromRendered(rendered) {
   });
 }
 
-async function serveExpiredSubscription(env, expiredSubscription, request) {
+async function serveExpiredSubscription(env, expiredSubscription, request, settingsOverride = null) {
   const target = detectTarget(request, "clash");
   if (!target || !supportedTargets.includes(target)) {
     return json({ error: "unsupported-target", supportedTargets }, 406);
   }
   try {
-    const settings = await loadSettings(env);
+    const settings = settingsOverride ?? await loadSettings(env);
     const rendered = renderSubscription(buildExpiredDisplayNodes(expiredSubscription.nodeNames), target, settings.clashConfig);
     return responseFromRendered(rendered);
   } catch {
@@ -2298,7 +2336,7 @@ async function serveExpiredSubscription(env, expiredSubscription, request) {
   }
 }
 
-async function serveDistributionSubscription(env, distributionSubscription, request) {
+async function serveDistributionSubscription(env, distributionSubscription, request, settingsOverride = null, expiredSubscriptionOverride = null) {
   const state = await loadState(env, AGGREGATE_STATE_ID);
   if (!state?.nodes?.length) return new Response("No valid aggregate subscription has been published yet", { status: 503 });
   const target = detectTarget(request, "clash");
@@ -2306,8 +2344,8 @@ async function serveDistributionSubscription(env, distributionSubscription, requ
     return json({ error: "unsupported-target", supportedTargets }, 406);
   }
   try {
-    const settings = await loadSettings(env);
-    const expiredSubscription = await loadExpiredSubscription(env);
+    const settings = settingsOverride ?? await loadSettings(env);
+    const expiredSubscription = expiredSubscriptionOverride ?? await loadExpiredSubscription(env);
     // Older aggregate snapshots may have been created while the expired-link
     // placeholders were still part of the aggregate. Keep distribution output
     // independent even before the next aggregate refresh rewrites that state.
@@ -2327,7 +2365,7 @@ async function serveDistributionSubscription(env, distributionSubscription, requ
   }
 }
 
-async function servePublishedState(env, stateId, defaultTarget, request) {
+async function servePublishedState(env, stateId, defaultTarget, request, settingsOverride = null) {
   const state = await loadState(env, stateId);
   if (!state?.output) return new Response("No valid subscription has been published yet", { status: 503 });
   const target = detectTarget(request, defaultTarget);
@@ -2337,7 +2375,7 @@ async function servePublishedState(env, stateId, defaultTarget, request) {
 
   let rendered;
   try {
-    const settings = await loadSettings(env);
+    const settings = settingsOverride ?? await loadSettings(env);
     // Older KV records contain only Clash YAML. Keep that format available
     // while requiring one successful refresh before serving other targets.
     rendered = state.nodes?.length
@@ -2352,8 +2390,8 @@ async function servePublishedState(env, stateId, defaultTarget, request) {
   return responseFromRendered(rendered);
 }
 
-async function servePublished(env, profile, request) {
-  return servePublishedState(env, profile.id, profile.defaultTarget, request);
+async function servePublished(env, profile, request, settingsOverride = null) {
+  return servePublishedState(env, profile.id, profile.defaultTarget, request, settingsOverride);
 }
 
 export default {
@@ -2365,25 +2403,25 @@ export default {
       });
     }
     if (url.pathname.startsWith("/api/admin/")) return handleAdminApi(request, env, url);
-    const profiles = await loadProfiles(env);
     if (url.pathname === "/healthz") {
+      const profiles = await loadProfiles(env);
       return json({ ok: true, configured: profiles.length > 0, profiles: profiles.length });
     }
     if (request.method === "GET" && url.pathname.startsWith("/sub/")) {
+      const publicConfig = await loadPublicRouteConfig(env);
       const token = url.pathname.slice("/sub/".length);
-      const profile = profiles.find((item) => item.publicToken === token);
-      if (profile) return servePublished(env, profile, request);
-      const aggregateToken = await loadAggregateToken(env);
-      if (token && aggregateToken && token === aggregateToken) {
-        return servePublishedState(env, AGGREGATE_STATE_ID, "clash", request);
+      const profile = publicConfig.profiles.find((item) => item.publicToken === token);
+      if (profile) return servePublished(env, profile, request, publicConfig.settings);
+      if (token && publicConfig.aggregatePublicToken && token === publicConfig.aggregatePublicToken) {
+        return servePublishedState(env, AGGREGATE_STATE_ID, "clash", request, publicConfig.settings);
       }
-      const distributionSubscription = (await loadDistributionSubscriptions(env)).find((item) => item.publicToken === token);
+      const distributionSubscription = publicConfig.distributionSubscriptions.find((item) => item.publicToken === token);
       if (token && distributionSubscription) {
-        return serveDistributionSubscription(env, distributionSubscription, request);
+        return serveDistributionSubscription(env, distributionSubscription, request, publicConfig.settings, publicConfig.expiredSubscription);
       }
-      const expiredSubscription = await loadExpiredSubscription(env);
+      const expiredSubscription = publicConfig.expiredSubscription;
       if (token && expiredSubscription.tokens.includes(token)) {
-        return serveExpiredSubscription(env, expiredSubscription, request);
+        return serveExpiredSubscription(env, expiredSubscription, request, publicConfig.settings);
       }
     }
     return new Response("Not found", { status: 404 });
