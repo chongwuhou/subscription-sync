@@ -225,7 +225,16 @@ function renderSingBox(nodes) {
   if (outbounds.length === 0) throw new Error("No nodes can be rendered for sing-box");
   return `${JSON.stringify({
     outbounds: [
-      { type: "selector", tag: "PROXY", outbounds: ["DIRECT", ...outbounds.map((item) => item.tag)] },
+      {
+        type: "urltest",
+        tag: "PROXY",
+        outbounds: outbounds.map((item) => item.tag),
+        url: "https://www.gstatic.com/generate_204",
+        interval: "5m",
+        tolerance: 50,
+        idle_timeout: "30m",
+        interrupt_exist_connections: false
+      },
       { type: "direct", tag: "DIRECT" },
       ...outbounds
     ]

@@ -9,7 +9,7 @@ import {
 } from "./config.js";
 import { decodeSubscription } from "./codec.js";
 import { detectTarget, renderSubscription, supportedTargets } from "./formats.js";
-import { normalizeClashConfig } from "./clash.js";
+import { normalizeAutomaticClashConfig } from "./clash.js";
 
 // Expired aggregate links are rendered with universal display-only VMess placeholders.
 const DEFAULT_MAX_SOURCE_BYTES = 5 * 1024 * 1024;
@@ -91,7 +91,7 @@ const ADMIN_HTML = `<!doctype html>
       expiredSubscription: { tokens: [], nodeNames: ["订阅已过期", "请联系顾问", "续费后恢复"] },
       refreshIntervalMinutes: 30,
       clashConfig: {
-        "proxy-groups": [{ name: "PROXY", type: "select", proxies: ["DIRECT", "{{NODES}}"] }],
+        "proxy-groups": [{ name: "PROXY", type: "url-test", url: "https://www.gstatic.com/generate_204", interval: 300, tolerance: 50, lazy: false, proxies: ["{{NODES}}"] }],
         "rule-providers": {},
         rules: ["MATCH,PROXY"]
       },
@@ -348,7 +348,7 @@ const ADMIN_HTML = `<!doctype html>
       const details = document.createElement("details");
       details.className = "rules-help";
       const summary = document.createElement("summary");
-      summary.textContent = "Clash / Mihomo 分流配置（可选，汇总和各订阅共用）";
+      summary.textContent = "Clash / Mihomo 分流配置（默认自动测速，汇总和各订阅共用）";
       details.appendChild(summary);
       const label = document.createElement("label");
       label.textContent = "配置 JSON（proxy-groups、rule-providers、rules）";
@@ -359,7 +359,7 @@ const ADMIN_HTML = `<!doctype html>
       details.appendChild(label);
       const help = document.createElement("p");
       help.className = "muted";
-      help.textContent = "代理组中的 {{NODES}} 会自动展开为当前所有有效节点；规则提供商地址请使用你信任的来源。留空字段会使用 PROXY + MATCH 的默认配置。";
+      help.textContent = "默认使用 url-test 自动测速并在节点失联时切换可用节点；代理组中的 {{NODES}} 会自动展开为当前所有有效节点。规则提供商地址请使用你信任的来源。通常不需要修改这里。";
       details.appendChild(help);
       clashSettingsRoot.appendChild(details);
     }
@@ -837,7 +837,7 @@ async function loadSettings(env) {
         const parsed = JSON.parse(stored);
         return {
           refreshIntervalMinutes: normalizeRefreshInterval(parsed.refreshIntervalMinutes),
-          clashConfig: normalizeClashConfig(parsed.clashConfig),
+          clashConfig: normalizeAutomaticClashConfig(parsed.clashConfig),
           aggregateCustomNodes: normalizeAggregateCustomNodes(parsed.aggregateCustomNodes),
           aggregateCustomNodePosition: normalizeAggregateCustomNodePosition(parsed.aggregateCustomNodePosition)
         };
@@ -848,7 +848,7 @@ async function loadSettings(env) {
   }
   return {
     refreshIntervalMinutes: normalizeRefreshInterval(env.REFRESH_INTERVAL_MINUTES),
-    clashConfig: normalizeClashConfig(env.CLASH_CONFIG_JSON),
+    clashConfig: normalizeAutomaticClashConfig(env.CLASH_CONFIG_JSON),
     aggregateCustomNodes: normalizeAggregateCustomNodes(env.AGGREGATE_CUSTOM_NODES),
     aggregateCustomNodePosition: normalizeAggregateCustomNodePosition(env.AGGREGATE_CUSTOM_NODE_POSITION)
   };
@@ -1096,7 +1096,7 @@ async function handleAdminApi(request, env, url) {
       }
       const current = await loadSettings(env);
       const clashConfig = Object.prototype.hasOwnProperty.call(body ?? {}, "clashConfig")
-        ? normalizeClashConfig(body.clashConfig, true)
+        ? normalizeAutomaticClashConfig(body.clashConfig, true)
         : current.clashConfig;
       const aggregateCustomNodes = Object.prototype.hasOwnProperty.call(body ?? {}, "aggregateCustomNodes")
         ? normalizeAggregateCustomNodes(body.aggregateCustomNodes)

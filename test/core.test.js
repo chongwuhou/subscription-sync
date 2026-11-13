@@ -29,6 +29,7 @@ test("parses Clash YAML and keeps only structurally valid nodes", async () => {
   assert.equal(candidate.validCount, 1);
   assert.equal(candidate.nodes[0].name, "US-Alpha");
   assert.match(candidate.output, /proxy-groups:/);
+  assert.match(candidate.output, /type: url-test/);
 });
 
 test("accepts AnyTLS nodes in Clash YAML", async () => {
@@ -210,6 +211,9 @@ test("supports AnyTLS share links and output formats", () => {
   const links = renderSubscription([anytls], "links");
   assert.match(links.body, /^anytls:\/\/secret@example\.com:443\/?\?sni=example\.com&insecure=1#AnyTLS%20Test/);
   const singBox = JSON.parse(renderSubscription([anytls], "sing-box").body);
+  assert.equal(singBox.outbounds[0].type, "urltest");
+  assert.equal(singBox.outbounds[0].url, "https://www.gstatic.com/generate_204");
+  assert.equal(singBox.outbounds[0].interval, "5m");
   const outbound = singBox.outbounds.find((item) => item.type === "anytls");
   assert.equal(outbound.password, "secret");
   assert.equal(outbound.tls.server_name, "example.com");
@@ -248,6 +252,7 @@ test("renders multiple client formats and detects common client user agents", as
   assert.match(decoded, /vmess:\/\//);
   const singBox = renderSubscription(candidate.nodes, "sing-box");
   assert.equal(JSON.parse(singBox.body).outbounds[0].tag, "PROXY");
+  assert.equal(JSON.parse(singBox.body).outbounds[0].type, "urltest");
 });
 
 test("renders configurable Clash rule providers and expands all nodes in proxy groups", async () => {

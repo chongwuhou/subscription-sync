@@ -101,7 +101,7 @@ Clash 分流配置示例（后台的折叠项中填写）：
 ```json
 {
   "proxy-groups": [
-    {"name":"PROXY","type":"select","proxies":["DIRECT","{{NODES}}"]}
+    {"name":"PROXY","type":"url-test","url":"https://www.gstatic.com/generate_204","interval":300,"tolerance":50,"lazy":false,"proxies":["{{NODES}}"]}
   ],
   "rule-providers": {
     "ads": {
@@ -116,7 +116,7 @@ Clash 分流配置示例（后台的折叠项中填写）：
 }
 ```
 
-其中 `{{NODES}}` 是项目提供的占位符，会被替换成汇总订阅当前所有有效节点。Rule Provider 地址不会由项目偷偷注入，建议只填写自己信任的公开规则源。
+其中 `{{NODES}}` 是项目提供的占位符，会被替换成当前所有有效节点。默认的 `url-test` 会定期测试节点延迟，节点失联时自动跳过并选择其他可用节点；不需要在后台手动设置。Rule Provider 地址不会由项目偷偷注入，建议只填写自己信任的公开规则源。sing-box 输出也默认生成 `urltest` 组。
 
 改名规则可以直接复制下面的案例到后台的“改名规则 JSON”框：
 

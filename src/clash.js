@@ -2,7 +2,15 @@ const NODE_PLACEHOLDER = /^\{\{(?:NODES|ALL_NODES)\}\}$/;
 
 export const DEFAULT_CLASH_CONFIG = Object.freeze({
   "proxy-groups": [
-    { name: "PROXY", type: "select", proxies: ["DIRECT", "{{NODES}}"] }
+    {
+      name: "PROXY",
+      type: "url-test",
+      url: "https://www.gstatic.com/generate_204",
+      interval: 300,
+      tolerance: 50,
+      lazy: false,
+      proxies: ["{{NODES}}"]
+    }
   ],
   "rule-providers": {},
   rules: ["MATCH,PROXY"]
@@ -81,6 +89,31 @@ export function normalizeClashConfig(value, strict = false) {
     if (strict) throw error;
     return clone(DEFAULT_CLASH_CONFIG);
   }
+}
+
+export function normalizeAutomaticClashConfig(value, strict = false) {
+  const normalized = normalizeClashConfig(value, strict);
+  const groups = normalized["proxy-groups"];
+  const legacyDefault = groups.length === 1
+    && groups[0].name === "PROXY"
+    && groups[0].type === "select"
+    && Array.isArray(groups[0].proxies)
+    && groups[0].proxies.length === 2
+    && groups[0].proxies.includes("DIRECT")
+    && groups[0].proxies.some((item) => /^\{\{(?:NODES|ALL_NODES)\}\}$/.test(String(item).trim()));
+  if (!legacyDefault) return normalized;
+  return {
+    ...normalized,
+    "proxy-groups": [{
+      ...groups[0],
+      type: "url-test",
+      url: "https://www.gstatic.com/generate_204",
+      interval: 300,
+      tolerance: 50,
+      lazy: false,
+      proxies: ["{{NODES}}"]
+    }]
+  };
 }
 
 function expandNodes(value, names) {

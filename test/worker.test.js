@@ -206,7 +206,9 @@ test("multiple subscriptions have isolated state", async () => {
 
     const singBoxResponse = await worker.fetch(new Request("https://worker.example.com/sub/main-token?target=sing-box"), env);
     assert.equal(singBoxResponse.status, 200);
-    assert.equal(JSON.parse(await singBoxResponse.text()).outbounds[0].tag, "PROXY");
+    const singBox = JSON.parse(await singBoxResponse.text());
+    assert.equal(singBox.outbounds[0].tag, "PROXY");
+    assert.equal(singBox.outbounds[0].type, "urltest");
 
     const aggregateResponse = await worker.fetch(new Request("https://worker.example.com/sub/all-token"), env);
     assert.equal(aggregateResponse.status, 200);
@@ -235,6 +237,7 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(pageText, /复制地址/);
   assert.match(pageText, /默认只替换名称/);
   assert.match(pageText, /Clash \/ Mihomo 分流配置/);
+  assert.match(pageText, /默认自动测速/);
   assert.match(pageText, /Rule Providers|rule-providers/);
   assert.match(pageText, /上传并保存历史源/);
   assert.match(pageText, /节点名称组合筛选/);
