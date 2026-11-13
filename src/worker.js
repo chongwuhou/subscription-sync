@@ -59,6 +59,10 @@ const ADMIN_HTML = `<!doctype html>
     .overview-card { min-height: 104px; padding: 1rem 1.05rem; border: 1px solid var(--line); border-radius: 20px; background: var(--glass); box-shadow: 0 14px 38px rgba(43,65,120,.08), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(18px) saturate(135%); }
     .overview-value { display: block; margin-top: .22rem; color: #213f9f; font-size: 1.7rem; font-weight: 760; letter-spacing: -.03em; }
     .overview-label { color: var(--muted); font-size: .84rem; font-weight: 650; }
+    .auth-bar { display: flex; align-items: end; gap: .75rem; margin: 1.15rem 0; padding: .9rem 1rem; border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,.48); box-shadow: 0 14px 34px rgba(43,65,120,.07), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(18px) saturate(135%); }
+    .auth-bar label { flex: 1 1 auto; margin: 0; }
+    .auth-bar button { flex: 0 0 auto; margin: 0; }
+    .auth-note { flex: 0 0 auto; padding-bottom: .75rem; color: var(--muted); font-size: .82rem; }
     .toast { position: fixed; top: 1.15rem; right: 1.15rem; z-index: 20; max-width: min(420px, calc(100vw - 2rem)); padding: .8rem 1rem; color: #1e3b2c; border: 1px solid rgba(117,206,153,.62); border-radius: 15px; background: rgba(236,255,244,.84); box-shadow: 0 16px 38px rgba(28,84,55,.16), inset 0 1px 0 rgba(255,255,255,.9); backdrop-filter: blur(18px) saturate(135%); opacity: 0; transform: translateY(-10px); pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
     .toast.show { opacity: 1; transform: translateY(0); }
     .toast.error { color: #7c2634; border-color: rgba(229,133,148,.62); background: rgba(255,239,242,.88); }
@@ -112,14 +116,19 @@ const ADMIN_HTML = `<!doctype html>
     @media (max-width: 720px) { .rename-rule-row { grid-template-columns: 1fr; } }
     @media (max-width: 720px) { .preview-grid { grid-template-columns: 1fr; } }
     .actions-bottom { position: sticky; bottom: 1rem; margin: 1rem 0 3rem; padding: .75rem .9rem; background: rgba(255,255,255,.7); border: 1px solid var(--line); border-radius: 17px; box-shadow: 0 14px 34px rgba(43,65,120,.12), inset 0 1px 0 rgba(255,255,255,.9); backdrop-filter: blur(18px); }
-    @media (max-width: 760px) { .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .profile-section-grid { grid-template-columns: 1fr; } body { padding-top: 2rem; } }
+    @media (max-width: 760px) { .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .profile-section-grid { grid-template-columns: 1fr; } .auth-bar { align-items: stretch; flex-direction: column; } .auth-bar button { width: 100%; } .auth-note { padding-bottom: 0; } body { padding-top: 2rem; } }
     @media (max-width: 460px) { .overview-grid { grid-template-columns: 1fr 1fr; gap: .55rem; } .overview-card { min-height: 90px; padding: .75rem; } .overview-value { font-size: 1.35rem; } }
   </style>
 </head>
 <body>
   <h1>Subscription Sync 管理</h1>
   <p class="muted">管理源头订阅地址、节点过滤、节点改名规则、最低有效节点数和客户端输出格式。配置以受保护的 Cloudflare D1 为准，KV 只作兼容缓存，不保存在浏览器。</p>
-  <p><button id="login">输入管理员令牌</button> <button id="reload" disabled>重新读取</button> <button id="save" disabled>保存订阅配置</button> <button id="refresh" disabled>立即刷新</button> <button id="add" disabled>新增订阅</button></p>
+  <div class="auth-bar">
+    <label for="admin-token">管理员令牌<input id="admin-token" type="password" autocomplete="off" spellcheck="false" placeholder="直接输入 ADMIN_TOKEN"></label>
+    <button id="login" type="button">进入管理</button>
+    <span class="auth-note">仅本次页面会话使用，不写入浏览器</span>
+  </div>
+  <p><button id="reload" disabled>重新读取</button> <button id="save" disabled>保存订阅配置</button> <button id="refresh" disabled>立即刷新</button> <button id="add" disabled>新增订阅</button></p>
   <label>自动刷新间隔（分钟，5-1440，按 5 分钟粒度）<input id="interval" type="number" min="5" max="1440" step="5" value="30" disabled></label>
   <p class="notice">保存后，订阅配置、改名规则、Clash 分流配置和刷新间隔以 Cloudflare D1 为最终来源，并同步 KV 兼容缓存；源订阅节点在下一次定时刷新或点击“立即刷新”后更新。源站临时不可用时使用 D1 最近一次有效快照并重新套用当前规则。只有管理员令牌可以读取源地址。</p>
   <div id="status"></div>
@@ -153,6 +162,8 @@ const ADMIN_HTML = `<!doctype html>
     const clashSettingsRoot = document.getElementById("clash-settings");
     const root = document.getElementById("profiles");
     const interval = document.getElementById("interval");
+    const tokenInput = document.getElementById("admin-token");
+    const loginButton = document.getElementById("login");
     const buttons = ["reload", "save", "save-bottom", "refresh", "add"].map((id) => document.getElementById(id));
     let toastTimer;
     function showToast(text, type = "success") {
@@ -748,14 +759,24 @@ const ADMIN_HTML = `<!doctype html>
         state.controlPlane = data.controlPlane || "";
         render();
         setStatus("已读取 " + state.profiles.length + " 个订阅（" + (data.controlPlane === "d1" ? "D1 是权威配置源，KV 为兼容缓存" : data.managed ? "兼容 KV 已保存配置" : "使用环境变量回退") + "）");
-      } catch (error) { setStatus(error.message); }
+        return true;
+      } catch (error) { setStatus(error.message, "error"); return false; }
     }
-    document.getElementById("login").onclick = async () => {
-      const value = prompt("请输入 ADMIN_TOKEN（不会保存到浏览器）");
-      if (!value) return;
+    loginButton.onclick = async () => {
+      const value = tokenInput.value.trim();
+      if (!value) { setStatus("请输入管理员令牌", "error"); tokenInput.focus(); return; }
+      loginButton.disabled = true;
       state.token = value;
-      await load();
+      const ok = await load();
+      if (ok) {
+        tokenInput.value = "";
+        tokenInput.placeholder = "已连接，可重新输入令牌";
+      } else {
+        state.token = "";
+      }
+      loginButton.disabled = false;
     };
+    tokenInput.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); loginButton.click(); } });
     document.getElementById("reload").onclick = load;
     document.getElementById("add").onclick = () => {
       state.profiles.push({ id: "", name: "", sourceUrl: "", publicToken: "", nodeNameInclude: "", nodeNameIncludeAll: "", nodeNameExclude: "", replaceAllFields: false, paused: false, minValidNodes: 1, defaultTarget: "clash", renameRules: [] });
