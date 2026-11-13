@@ -34,42 +34,58 @@ const ADMIN_HTML = `<!doctype html>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Subscription Sync 管理</title>
   <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-    body { max-width: 980px; margin: 2rem auto; padding: 0 1rem; }
-    fieldset { margin: 1rem 0; border: 1px solid #8885; border-radius: 8px; }
-    label { display: block; margin: .65rem 0; font-weight: 600; }
-    input, textarea { display: block; box-sizing: border-box; width: 100%; margin-top: .3rem; padding: .55rem; font: inherit; }
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; --ink: #17233d; --muted: #66738f; --line: rgba(255,255,255,.72); --glass: rgba(255,255,255,.58); --glass-strong: rgba(255,255,255,.76); --accent: #3567f2; --accent-dark: #244dc6; }
+    * { box-sizing: border-box; }
+    body { position: relative; max-width: 1180px; margin: 0 auto; padding: 3.5rem 1.2rem 4rem; color: var(--ink); background: radial-gradient(circle at 5% 0%, #d9e8ff 0, transparent 36%), radial-gradient(circle at 96% 8%, #e9dcff 0, transparent 34%), linear-gradient(145deg, #f8fbff 0%, #edf3fc 48%, #f7f2ff 100%); min-height: 100vh; }
+    body::before { content: ""; position: fixed; inset: 0; pointer-events: none; background: linear-gradient(120deg, rgba(255,255,255,.46), transparent 42%, rgba(255,255,255,.24)); z-index: -1; }
+    h1 { margin: 0 0 .65rem; letter-spacing: -.035em; font-size: clamp(2rem, 4vw, 3rem); }
+    fieldset { margin: 1rem 0; padding: 1.15rem 1.25rem; border: 1px solid var(--line); border-radius: 22px; background: var(--glass); box-shadow: 0 18px 48px rgba(43,65,120,.09), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(22px) saturate(135%); }
+    label { display: block; margin: .7rem 0; font-weight: 650; color: var(--ink); }
+    input, textarea, select { display: block; box-sizing: border-box; width: 100%; margin-top: .38rem; padding: .72rem .82rem; color: var(--ink); font: inherit; border: 1px solid rgba(109,128,168,.28); border-radius: 12px; outline: none; background: rgba(255,255,255,.68); box-shadow: inset 0 1px 2px rgba(52,72,116,.04), 0 2px 8px rgba(41,63,113,.03); transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
+    input:focus, textarea:focus, select:focus { border-color: rgba(53,103,242,.7); background: rgba(255,255,255,.9); box-shadow: 0 0 0 4px rgba(53,103,242,.12), 0 8px 20px rgba(53,103,242,.08); }
     textarea { min-height: 3.2rem; font-family: ui-monospace, monospace; }
     .check-label { display: flex; align-items: center; gap: .5rem; }
     .check-label input { width: auto; margin: 0; }
-    button { margin: .35rem .5rem .35rem 0; padding: .55rem .8rem; font: inherit; cursor: pointer; }
-    #status { min-height: 1.5rem; white-space: pre-wrap; }
-    .muted { opacity: .75; }
-    .notice { padding: .7rem .9rem; border-radius: 6px; background: #16803c18; border: 1px solid #16803c55; }
-    .rules-help { margin: .4rem 0 1rem; padding: .6rem .8rem; border: 1px solid #8885; border-radius: 6px; }
+    button { margin: .35rem .5rem .35rem 0; padding: .66rem .92rem; color: #213158; font: inherit; font-weight: 650; border: 1px solid rgba(255,255,255,.86); border-radius: 12px; background: rgba(255,255,255,.62); box-shadow: 0 7px 18px rgba(42,63,115,.08), inset 0 1px 0 rgba(255,255,255,.95); cursor: pointer; transition: transform .16s ease, box-shadow .16s ease, background .16s ease; }
+    button:hover:not(:disabled) { transform: translateY(-1px); background: rgba(255,255,255,.88); box-shadow: 0 12px 24px rgba(42,63,115,.13), inset 0 1px 0 rgba(255,255,255,.98); }
+    button:active:not(:disabled) { transform: translateY(0); }
+    button:disabled { cursor: not-allowed; opacity: .48; }
+    #login, #save, #save-bottom, #refresh { color: white; border-color: rgba(53,103,242,.5); background: linear-gradient(135deg, #4f7cff, #3159d9); box-shadow: 0 10px 22px rgba(53,103,242,.23), inset 0 1px 0 rgba(255,255,255,.3); }
+    #login:hover:not(:disabled), #save:hover:not(:disabled), #save-bottom:hover:not(:disabled), #refresh:hover:not(:disabled) { background: linear-gradient(135deg, #5b86ff, #244dc6); }
+    #status { min-height: 1.55rem; padding: .2rem .15rem; white-space: pre-wrap; color: var(--muted); font-size: .92rem; }
+    .muted { color: var(--muted); opacity: .9; }
+    .notice { padding: .9rem 1rem; border-radius: 16px; color: #24426e; background: rgba(224,240,255,.68); border: 1px solid rgba(126,181,246,.45); box-shadow: inset 0 1px 0 rgba(255,255,255,.8); }
+    .overview-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; margin: 1rem 0 1.15rem; }
+    .overview-card { min-height: 104px; padding: 1rem 1.05rem; border: 1px solid var(--line); border-radius: 20px; background: var(--glass); box-shadow: 0 14px 38px rgba(43,65,120,.08), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(18px) saturate(135%); }
+    .overview-value { display: block; margin-top: .22rem; color: #213f9f; font-size: 1.7rem; font-weight: 760; letter-spacing: -.03em; }
+    .overview-label { color: var(--muted); font-size: .84rem; font-weight: 650; }
+    .toast { position: fixed; top: 1.15rem; right: 1.15rem; z-index: 20; max-width: min(420px, calc(100vw - 2rem)); padding: .8rem 1rem; color: #1e3b2c; border: 1px solid rgba(117,206,153,.62); border-radius: 15px; background: rgba(236,255,244,.84); box-shadow: 0 16px 38px rgba(28,84,55,.16), inset 0 1px 0 rgba(255,255,255,.9); backdrop-filter: blur(18px) saturate(135%); opacity: 0; transform: translateY(-10px); pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.error { color: #7c2634; border-color: rgba(229,133,148,.62); background: rgba(255,239,242,.88); }
+    .rules-help { margin: .6rem 0 1rem; padding: .85rem 1rem; border: 1px solid rgba(255,255,255,.72); border-radius: 16px; background: rgba(255,255,255,.4); box-shadow: inset 0 1px 0 rgba(255,255,255,.8); }
     .rules-help summary { cursor: pointer; font-weight: 600; }
     .rules-help pre { overflow-x: auto; white-space: pre-wrap; font-size: .9rem; }
     .rules-help code { font-family: ui-monospace, monospace; }
-    .profile-card { margin: 1rem 0; padding: .45rem .8rem; border: 1px solid #8885; border-radius: 8px; }
-    .profile-card > summary { cursor: pointer; font-weight: 700; padding: .25rem 0; }
+    .profile-card { margin: 1rem 0; padding: .5rem .95rem .95rem; border: 1px solid var(--line); border-radius: 22px; background: rgba(255,255,255,.42); box-shadow: 0 18px 48px rgba(43,65,120,.08), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(20px) saturate(135%); }
+    .profile-card > summary { cursor: pointer; font-weight: 750; padding: .7rem .25rem; color: #233c7e; }
     .profile-card fieldset { margin: .5rem 0 0; padding: 0; border: 0; }
     .preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; margin: .8rem 0; }
-    .preview-pane { border: 1px solid #8885; border-radius: 6px; padding: .6rem; min-width: 0; }
+    .preview-pane { border: 1px solid rgba(255,255,255,.72); border-radius: 15px; padding: .75rem; min-width: 0; background: rgba(255,255,255,.46); box-shadow: inset 0 1px 0 rgba(255,255,255,.8); }
     .preview-pane h3 { margin: 0 0 .4rem; font-size: 1rem; }
     .preview-pane ul { margin: 0; padding-left: 1.2rem; max-height: 16rem; overflow: auto; }
-    .filter-rules { margin: .8rem 0; padding: .7rem; border: 1px solid #8885; border-radius: 6px; }
+    .filter-rules { margin: .8rem 0; padding: .8rem; border: 1px solid rgba(255,255,255,.72); border-radius: 15px; background: rgba(255,255,255,.36); }
     .filter-rules-title { font-weight: 600; margin-bottom: .5rem; }
-    .history-panel { margin: .8rem 0; padding: .65rem .75rem; border: 1px solid #8885; border-radius: 6px; }
+    .history-panel { margin: .8rem 0; padding: .7rem .8rem; border: 1px solid rgba(255,255,255,.72); border-radius: 15px; background: rgba(255,255,255,.34); }
     .history-panel > summary { cursor: pointer; font-weight: 600; }
-    .history-version-row { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin: .55rem 0 0; padding: .55rem; border: 1px solid #8884; border-radius: 5px; }
+    .history-version-row { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin: .55rem 0 0; padding: .65rem; border: 1px solid rgba(255,255,255,.7); border-radius: 12px; background: rgba(255,255,255,.46); }
     .history-version-meta { min-width: 0; }
     .history-version-meta strong { display: block; }
     .history-version-meta small { display: block; margin-top: .15rem; opacity: .75; overflow-wrap: anywhere; }
     .history-version-row button { flex: 0 0 auto; margin: 0; }
-    .status-panel { margin: .7rem 0; padding: .65rem .8rem; border: 1px solid #8885; border-radius: 6px; background: color-mix(in srgb, Canvas 94%, #16803c 6%); }
+    .status-panel { margin: .7rem 0; padding: .75rem .9rem; border: 1px solid rgba(119,188,156,.42); border-radius: 15px; background: rgba(239,255,247,.57); box-shadow: inset 0 1px 0 rgba(255,255,255,.84); }
     .status-panel strong { display: block; margin-bottom: .25rem; }
     .status-panel small { display: block; opacity: .78; line-height: 1.45; }
-    .rename-rules { margin: .8rem 0; padding: .7rem; border: 1px solid #8885; border-radius: 6px; }
+    .rename-rules { margin: .8rem 0; padding: .8rem; border: 1px solid rgba(255,255,255,.72); border-radius: 15px; background: rgba(255,255,255,.36); }
     .rename-rules-title { font-weight: 600; margin-bottom: .5rem; }
     .rename-rule-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; gap: .45rem; align-items: end; margin: .45rem 0; }
     .rename-rule-row label { margin: 0; }
@@ -77,7 +93,9 @@ const ADMIN_HTML = `<!doctype html>
     .rename-rule-row .remove-rule { margin: 0; }
     @media (max-width: 720px) { .rename-rule-row { grid-template-columns: 1fr; } }
     @media (max-width: 720px) { .preview-grid { grid-template-columns: 1fr; } }
-    .actions-bottom { position: sticky; bottom: 0; margin: 1rem 0 3rem; padding: .7rem; background: Canvas; border: 1px solid #8885; border-radius: 8px; }
+    .actions-bottom { position: sticky; bottom: 1rem; margin: 1rem 0 3rem; padding: .75rem .9rem; background: rgba(255,255,255,.7); border: 1px solid var(--line); border-radius: 17px; box-shadow: 0 14px 34px rgba(43,65,120,.12), inset 0 1px 0 rgba(255,255,255,.9); backdrop-filter: blur(18px); }
+    @media (max-width: 760px) { .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } body { padding-top: 2rem; } }
+    @media (max-width: 460px) { .overview-grid { grid-template-columns: 1fr 1fr; gap: .55rem; } .overview-card { min-height: 90px; padding: .75rem; } .overview-value { font-size: 1.35rem; } }
   </style>
 </head>
 <body>
@@ -87,10 +105,12 @@ const ADMIN_HTML = `<!doctype html>
   <label>自动刷新间隔（分钟，5-1440，按 5 分钟粒度）<input id="interval" type="number" min="5" max="1440" step="5" value="30" disabled></label>
   <p class="notice">保存后，订阅配置、改名规则、Clash 分流配置和刷新间隔以 Cloudflare D1 为最终来源，并同步 KV 兼容缓存；源订阅节点在下一次定时刷新或点击“立即刷新”后更新。源站临时不可用时使用 D1 最近一次有效快照并重新套用当前规则。只有管理员令牌可以读取源地址。</p>
   <div id="status"></div>
+  <div id="overview"></div>
   <div id="clash-settings"></div>
   <div id="aggregate"></div>
   <div id="profiles"></div>
   <div class="actions-bottom"><button id="save-bottom" disabled>保存订阅配置</button><span class="muted"> 保存后以 D1 为准，KV 只作兼容缓存</span></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script>
     const state = {
       token: "",
@@ -109,12 +129,28 @@ const ADMIN_HTML = `<!doctype html>
       controlPlane: ""
     };
     const status = document.getElementById("status");
+    const overviewRoot = document.getElementById("overview");
+    const toast = document.getElementById("toast");
     const aggregateRoot = document.getElementById("aggregate");
     const clashSettingsRoot = document.getElementById("clash-settings");
     const root = document.getElementById("profiles");
     const interval = document.getElementById("interval");
     const buttons = ["reload", "save", "save-bottom", "refresh", "add"].map((id) => document.getElementById(id));
-    const setStatus = (text) => { status.textContent = text || ""; };
+    let toastTimer;
+    function showToast(text, type = "success") {
+      window.clearTimeout(toastTimer);
+      toast.textContent = text || "";
+      toast.className = "toast" + (type === "error" ? " error" : "");
+      if (!text) return;
+      requestAnimationFrame(() => toast.classList.add("show"));
+      toastTimer = window.setTimeout(() => toast.classList.remove("show"), type === "error" ? 5200 : 3600);
+    }
+    const setStatus = (text, type = "") => {
+      status.textContent = text || "";
+      if (!text) return;
+      const inferred = type || (/失败|错误|不能|还没有|请先|必须|不可用|无效/.test(text) ? "error" : "success");
+      showToast(text, inferred);
+    };
     const setEnabled = (enabled) => buttons.forEach((button) => { button.disabled = !enabled; });
     async function api(path, options) {
       const headers = Object.assign({}, options && options.headers, { Authorization: "Bearer " + state.token });
@@ -294,6 +330,35 @@ const ADMIN_HTML = `<!doctype html>
       panel.appendChild(source);
       parent.appendChild(panel);
     }
+    function renderOverview() {
+      overviewRoot.replaceChildren();
+      if (!state.token) return;
+      const total = state.profiles.length;
+      const active = state.profiles.filter((profile) => profile.paused !== true).length;
+      const nodes = state.profiles.reduce((sum, profile) => sum + Number(profile.status?.lastValidCount || profile.validCount || 0), 0);
+      const cards = [
+        [String(total), "订阅源"],
+        [String(nodes), "最近有效节点"],
+        [String(state.refreshIntervalMinutes) + " 分钟", "自动刷新"],
+        [active + " / " + total, "自动更新中"]
+      ];
+      const grid = document.createElement("section");
+      grid.className = "overview-grid";
+      cards.forEach(([value, label]) => {
+        const card = document.createElement("div");
+        card.className = "overview-card";
+        const valueNode = document.createElement("span");
+        valueNode.className = "overview-value";
+        valueNode.textContent = value;
+        const labelNode = document.createElement("span");
+        labelNode.className = "overview-label";
+        labelNode.textContent = label;
+        card.appendChild(valueNode);
+        card.appendChild(labelNode);
+        grid.appendChild(card);
+      });
+      overviewRoot.appendChild(grid);
+    }
     function renderAggregate() {
       aggregateRoot.replaceChildren();
       const card = document.createElement("fieldset");
@@ -396,6 +461,7 @@ const ADMIN_HTML = `<!doctype html>
       clashSettingsRoot.appendChild(details);
     }
     function render() {
+      renderOverview();
       renderClashSettings();
       renderAggregate();
       root.replaceChildren();
@@ -666,7 +732,7 @@ const ADMIN_HTML = `<!doctype html>
         const settingsResult = await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value), clashConfig, aggregateCustomNodes, aggregateCustomNodePosition }) });
         const scope = focusIndex ? "第 " + focusIndex + " 个订阅" : subscriptions.length + " 个订阅";
         await load();
-        setStatus("已保存" + scope + "、分流配置、刷新间隔及汇总自定义节点到 D1（KV 同步为兼容缓存，已识别 " + Number(settingsResult.aggregateCustomNodeCount || 0) + " 个自定义节点）。");
+        setStatus("保存成功：已保存" + scope + "、分流配置、刷新间隔及汇总自定义节点到 D1（KV 已同步为兼容缓存，已识别 " + Number(settingsResult.aggregateCustomNodeCount || 0) + " 个自定义节点）。");
       } catch (error) { setStatus(error.message); }
     }
     document.getElementById("save").onclick = () => saveAll();
