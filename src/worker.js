@@ -289,7 +289,8 @@ const ADMIN_HTML = `<!doctype html>
       detail.textContent = "最近处理：" + formatDate(value.lastRefreshAt) + " · " + (value.lastAction || "暂无") + (value.lastReason ? "（" + value.lastReason + "）" : "") + " · 有效节点：" + Number(value.lastValidCount || 0) + (extra ? " · " + extra : "");
       panel.appendChild(detail);
       const source = document.createElement("small");
-      source.textContent = "最近有效源：" + formatDate(value.sourceSnapshotAt) + (value.publishedAt ? " · 最近发布：" + formatDate(value.publishedAt) : "");
+      const origin = value.sourceOrigin === "historical-fallback" ? "历史快照回退" : value.sourceOrigin === "manual-upload" ? "手动上传" : value.sourceOrigin === "manual-history" ? "手动选用历史版本" : value.sourceOrigin === "source-url" ? "源头地址" : "";
+      source.textContent = "最近有效源：" + formatDate(value.sourceSnapshotAt) + (value.publishedAt ? " · 最近发布：" + formatDate(value.publishedAt) : "") + (origin ? " · 来源：" + origin : "");
       panel.appendChild(source);
       parent.appendChild(panel);
     }
@@ -1363,6 +1364,9 @@ async function publishDecision(env, profileId, decision, now, metadata = {}) {
     sourceSnapshotAt: metadata.sourceSnapshotAt ?? now.toISOString(),
     validCount: decision.validCount,
     updatedAt: now.toISOString(),
+    lastRefreshAt: now.toISOString(),
+    lastAction: decision.action,
+    lastReason: decision.reason,
     sourceNodes: decision.sourceNodes ?? decision.nodes,
     nodes: decision.nodes,
     output: decision.output
@@ -1469,6 +1473,7 @@ async function loadStatus(env, subscriptionId, sourceMeta = null) {
     publishedAt: state?.updatedAt ?? "",
     sourceSnapshotAt: sourceMeta?.capturedAt ?? stateSourceAt,
     sourceStorage: sourceMeta ? "d1" : state?.sourceSnapshotAt ? "kv" : "",
+    sourceOrigin: String(state?.sourceOrigin ?? ""),
     hasPublishedOutput: Boolean(state?.output || state?.nodes?.length)
   };
 }
@@ -1688,6 +1693,9 @@ export async function refreshAggregate(env, now = new Date(), profiles = null, s
     contentHash: decision.contentHash,
     validCount: decision.validCount,
     updatedAt: now.toISOString(),
+    lastRefreshAt: now.toISOString(),
+    lastAction: decision.action,
+    lastReason: decision.reason,
     nodes: decision.nodes,
     output: decision.output
   });
