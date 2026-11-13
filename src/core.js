@@ -30,6 +30,23 @@ function identityWithoutName(node) {
   return stableStringify(copy);
 }
 
+// A node is a duplicate only when every connection/configuration field is the
+// same and the display name is the only difference. Keep the lexicographically
+// smallest name so source ordering cannot make the published result oscillate.
+export function deduplicateNodes(nodes) {
+  const unique = new Map();
+  for (const item of Array.isArray(nodes) ? nodes : []) {
+    const node = item && typeof item === "object" ? item : null;
+    if (!node) continue;
+    const identity = identityWithoutName(node);
+    const previous = unique.get(identity);
+    if (!previous || String(node.name ?? "").localeCompare(String(previous.name ?? "")) < 0) {
+      unique.set(identity, node);
+    }
+  }
+  return [...unique.values()];
+}
+
 function sortNodes(nodes) {
   return [...nodes].sort((left, right) =>
     `${left.name}\u0000${left.type}\u0000${left.server}\u0000${left.port}`.localeCompare(
@@ -83,14 +100,14 @@ export async function buildAggregateCandidate(nodeGroups, options = {}) {
   const minValidNodes = Number.isFinite(requestedMinimum)
     ? Math.max(1, Math.floor(requestedMinimum))
     : 1;
-  const deduped = new Map();
+  const sourceNodes = [];
   for (const group of Array.isArray(nodeGroups) ? nodeGroups : []) {
     for (const item of Array.isArray(group) ? group : []) {
       const node = normalizeNode(item, []);
-      if (!isValidNode(node)) continue;
-      deduped.set(identityWithoutName(node), node);
+      if (isValidNode(node)) sourceNodes.push(node);
     }
   }
+  const deduped = new Map(deduplicateNodes(sourceNodes).map((node) => [identityWithoutName(node), node]));
   const customDeduped = new Map();
   for (const item of Array.isArray(options.customNodes) ? options.customNodes : []) {
     const node = normalizeNode(item, []);
@@ -128,19 +145,19 @@ export async function buildCandidateFromNodes(sourceNodes, options = {}) {
   const minValidNodes = Number.isFinite(requestedMinimum)
     ? Math.max(1, Math.floor(requestedMinimum))
     : 1;
-  const sourceDeduped = new Map();
-  const deduped = new Map();
+  const sourceCandidates = [];
+  const candidates = [];
   for (const item of Array.isArray(sourceNodes) ? sourceNodes : []) {
     const sourceNode = normalizeNode(item, []);
     if (!isValidNode(sourceNode)) continue;
-    sourceDeduped.set(identityWithoutName(sourceNode), sourceNode);
+    sourceCandidates.push(sourceNode);
     if (!matchesNodeNameFilter(sourceNode.name, options)) continue;
     const node = normalizeNode(sourceNode, renameRules, { replaceAllFields: options.replaceAllFields === true });
     if (!isValidNode(node)) continue;
-    deduped.set(identityWithoutName(node), node);
+    candidates.push(node);
   }
-  const historicalNodes = sortNodes(sourceDeduped.values());
-  const nodes = sortNodes(deduped.values());
+  const historicalNodes = sortNodes(deduplicateNodes(sourceCandidates));
+  const nodes = sortNodes(deduplicateNodes(candidates));
   const valid = nodes.length >= minValidNodes;
   const clashConfig = normalizeClashConfig(options.clashConfig);
   const canonical = valid ? stableStringify({ nodes, clashConfig }) : null;

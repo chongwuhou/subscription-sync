@@ -24,6 +24,7 @@ class MemoryD1 {
   constructor() {
     this.rows = [];
     this.snapshots = [];
+    this.chunks = [];
     this.controls = new Map();
   }
 
@@ -31,14 +32,25 @@ class MemoryD1 {
     return {
       bind: (...values) => {
         const isSnapshot = sql.includes("source_snapshots");
+        const isChunk = sql.includes("source_snapshot_chunks");
         const isControl = sql.includes("subscription_control");
         return {
           run: async () => {
             if (/^CREATE TABLE/i.test(sql)) {
               return;
             }
-            if (isSnapshot) {
+            if (isChunk) {
+              if (sql.startsWith("INSERT")) {
+                const existing = this.chunks.findIndex((row) => row[0] === values[0] && row[1] === values[1]);
+                if (existing >= 0) this.chunks[existing] = values;
+                else this.chunks.push(values);
+              } else if (sql.startsWith("DELETE")) {
+                this.chunks = this.chunks.filter((row) => row[0] !== values[0]);
+              }
+            } else if (isSnapshot && sql.startsWith("INSERT")) {
               if (!this.snapshots.some((row) => row[0] === values[0] && row[2] === values[2])) this.snapshots.push(values);
+            } else if (isSnapshot && sql.startsWith("DELETE")) {
+              this.snapshots = this.snapshots.filter((row) => row[0] !== values[0]);
             } else if (isControl && sql.startsWith("INSERT")) {
               this.controls.set(values[0], { control_key: values[0], value_json: values[1], updated_at: values[2] });
             } else if (isControl && sql.startsWith("DELETE")) {
@@ -49,6 +61,10 @@ class MemoryD1 {
           },
           first: async () => {
             if (isControl) return this.controls.get(values[0]) ?? null;
+            if (isChunk) {
+              const row = this.chunks.find((item) => item[0] === values[0]);
+              return row ? { chunk_json: row[2] } : null;
+            }
             if (sql.includes("refresh_audit")) {
               const row = this.rows
                 .filter((item) => item[0] === values[0])
@@ -68,12 +84,15 @@ class MemoryD1 {
               ? { captured_at: row[1], valid_count: row[3] }
               : { nodes_json: row[4] };
           },
-          all: async () => ({
-            results: this.snapshots
+          all: async () => isChunk
+            ? { results: this.chunks
+              .filter((item) => item[0] === values[0])
+              .sort((left, right) => left[1] - right[1])
+              .map((row) => ({ chunk_json: row[2] })) }
+            : { results: this.snapshots
               .filter((item) => item[0] === values[0])
               .sort((left, right) => String(right[1]).localeCompare(String(left[1])))
-              .map((row) => ({ id: this.snapshots.indexOf(row) + 1, captured_at: row[1], source_content_hash: row[2], valid_count: row[3] }))
-          })
+              .map((row) => ({ id: this.snapshots.indexOf(row) + 1, captured_at: row[1], source_content_hash: row[2], valid_count: row[3] })) }
         };
       }
     };
@@ -131,6 +150,76 @@ test("Worker refresh publishes only changed valid content", async () => {
     assert.equal(audit.rows[0][0], "default");
     assert.equal(audit.rows[0][1], "2026-11-12T00:00:00.000Z");
     assert.equal(audit.rows[2][2], "keep");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("uses conditional requests and retries transient source failures", async () => {
+  const originalFetch = globalThis.fetch;
+  const state = new MemoryKV();
+  const audit = new MemoryD1();
+  const env = {
+    SOURCE_URL: "https://source.example.com/conditional",
+    PUBLIC_PATH_TOKEN: "conditional-token",
+    SUBSCRIPTION_STATE: state,
+    SUBSCRIPTION_AUDIT: audit,
+    SOURCE_RETRY_COUNT: "1"
+  };
+  const calls = [];
+  globalThis.fetch = async (request, init) => {
+    calls.push({ request: typeof request === "string" ? request : request.url, headers: init?.headers ?? {} });
+    if (calls.length === 1) return new Response("temporary upstream failure", { status: 503 });
+    if (calls.length === 2) {
+      return new Response(validSource, {
+        status: 200,
+        headers: { etag: '"source-v1"', "last-modified": "Thu, 12 Nov 2026 00:00:00 GMT" }
+      });
+    }
+    return new Response(null, { status: 304, headers: { etag: '"source-v1"' } });
+  };
+  try {
+    const first = await refresh(env, new Date("2026-11-12T00:00:00.000Z"));
+    assert.equal(first.action, "initialize");
+    const published = JSON.parse(await state.get("published-state-v1:default"));
+    assert.equal(published.sourceEtag, '"source-v1"');
+    assert.equal(calls.length, 2);
+
+    const unchanged = await refresh(env, new Date("2026-11-12T00:06:00.000Z"));
+    assert.equal(unchanged.action, "keep");
+    assert.equal(unchanged.reason, "unchanged");
+    assert.equal(calls.length, 3);
+    assert.equal(calls[2].headers["if-none-match"], '"source-v1"');
+    assert.equal(calls[2].headers["if-modified-since"], "Thu, 12 Nov 2026 00:00:00 GMT");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("chunks large D1 source snapshots and can read them for fallback", async () => {
+  const originalFetch = globalThis.fetch;
+  const state = new MemoryKV();
+  const audit = new MemoryD1();
+  const env = {
+    SOURCE_URL: "https://source.example.com/large",
+    PUBLIC_PATH_TOKEN: "large-token",
+    SUBSCRIPTION_STATE: state,
+    SUBSCRIPTION_AUDIT: audit
+  };
+  const padding = "x".repeat(1300);
+  const largeSource = `proxies:\n${Array.from({ length: 1300 }, (_, index) => `  - name: Large ${index}\n    type: anytls\n    server: node-${index}.example.com\n    port: 443\n    password: ${padding}${index}\n`).join("")}`;
+  globalThis.fetch = async () => new Response(largeSource, { status: 200 });
+  try {
+    const first = await refresh(env, new Date("2026-11-12T02:00:00.000Z"));
+    assert.equal(first.action, "initialize");
+    assert.equal(audit.snapshots.length, 1);
+    assert.equal(audit.snapshots[0][4], "");
+    assert.ok(audit.chunks.length > 1);
+
+    globalThis.fetch = async () => { throw new Error("source closed"); };
+    const fallback = await refresh(env, new Date("2026-11-12T02:06:00.000Z"));
+    assert.equal(fallback.action, "keep");
+    assert.equal(fallback.reason, "source-unavailable-use-last-good");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -212,9 +301,14 @@ test("multiple subscriptions have isolated state", async () => {
     assert.equal(mainResponse.headers.get("content-type"), "text/yaml; charset=utf-8");
     assert.match(await backupResponse.text(), /backup.example.com/);
 
-    const base64Response = await worker.fetch(new Request("https://worker.example.com/sub/main-token", {
+    const surgeResponse = await worker.fetch(new Request("https://worker.example.com/sub/main-token", {
       headers: { "user-agent": "Shadowrocket/2.2" }
     }), env);
+    assert.equal(surgeResponse.status, 200);
+    assert.equal(surgeResponse.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.match(await surgeResponse.text(), /\[Proxy Group\]/);
+
+    const base64Response = await worker.fetch(new Request("https://worker.example.com/sub/main-token?target=base64"), env);
     assert.equal(base64Response.status, 200);
     assert.equal(base64Response.headers.get("content-type"), "text/plain; charset=utf-8");
     assert.match(atob((await base64Response.text()).trim()), /vmess:\/\//);

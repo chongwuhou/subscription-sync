@@ -238,6 +238,11 @@ function parseCommonUrl(link, type) {
     "client-fingerprint": query.get("fp") || undefined,
     "skip-cert-verify": query.get("allowInsecure") === "1" || query.get("insecure") === "1"
   };
+  const alpn = query.get("alpn");
+  if (alpn) node.alpn = alpn.split(",").map((item) => item.trim()).filter(Boolean);
+  if (query.get("packetEncoding") || query.get("packet-encoding")) {
+    node["packet-encoding"] = query.get("packetEncoding") || query.get("packet-encoding");
+  }
   const username = decodeURIComponentSafe(url.username);
   const password = decodeURIComponentSafe(url.password);
   if (type === "vless") node.uuid = username;
@@ -254,11 +259,33 @@ function parseCommonUrl(link, type) {
       headers: query.get("host") ? { Host: query.get("host") } : undefined
     };
   }
+  if (network === "h2" || network === "http") {
+    node["h2-opts"] = { path: query.get("path") || "/", host: query.get("host") || undefined };
+  }
+  if (network === "grpc") {
+    node["grpc-opts"] = { "grpc-service-name": query.get("serviceName") || query.get("service-name") || undefined };
+  }
+  if (network === "httpupgrade") {
+    node["http-upgrade-opts"] = { path: query.get("path") || "/", headers: query.get("host") ? { Host: query.get("host") } : undefined };
+  }
   if (query.get("pbk") || query.get("sid")) {
     node["reality-opts"] = {
       "public-key": query.get("pbk") || undefined,
       "short-id": query.get("sid") || undefined
     };
+  }
+  if (type === "hysteria" || type === "hysteria2") {
+    node.up = query.get("upmbps") || query.get("up");
+    node.down = query.get("downmbps") || query.get("down");
+    node.obfs = query.get("obfs") || undefined;
+    node["obfs-password"] = query.get("obfs-password") || undefined;
+  }
+  if (type === "tuic") {
+    node.congestion_controller = query.get("congestion_control") || query.get("congestion-controller") || undefined;
+    node.udp_relay_mode = query.get("udp_relay_mode") || undefined;
+    node.heartbeat = query.get("heartbeat") || undefined;
+    node.zero_rtt_handshake = query.get("zero_rtt_handshake") === "1";
+    node.reduce_rtt = query.get("reduce_rtt") === "1";
   }
   return node;
 }
@@ -266,15 +293,19 @@ function parseCommonUrl(link, type) {
 function parseAnyTls(link) {
   const url = new URL(link);
   const query = url.searchParams;
-  return {
+  const node = {
     name: decodeURIComponentSafe(url.hash.slice(1)) || `anytls-${url.hostname}`,
     type: "anytls",
     server: url.hostname,
     port: Number(url.port || 443),
     password: decodeURIComponentSafe(url.username),
     sni: query.get("sni") || undefined,
-    "skip-cert-verify": query.get("insecure") === "1"
+    "skip-cert-verify": query.get("insecure") === "1",
+    "client-fingerprint": query.get("fp") || undefined
   };
+  const alpn = query.get("alpn");
+  if (alpn) node.alpn = alpn.split(",").map((item) => item.trim()).filter(Boolean);
+  return node;
 }
 
 function parseVmess(link) {
@@ -292,7 +323,9 @@ function parseVmess(link) {
     cipher: data.scy || "auto",
     tls: data.tls === "tls" || data.tls === true,
     network: data.net || undefined,
-    sni: data.sni || undefined
+    sni: data.sni || undefined,
+    alpn: typeof data.alpn === "string" ? data.alpn.split(",").map((item) => item.trim()).filter(Boolean) : data.alpn,
+    "client-fingerprint": data.fp || undefined
   };
   if (node.network === "ws") {
     node["ws-opts"] = {
@@ -397,14 +430,16 @@ function normalizeSingBoxOutbound(item) {
     alterId: item.alter_id,
     "skip-cert-verify": tls?.insecure,
     alpn: tls?.alpn,
-    "client-fingerprint": tls?.utls?.fingerprint
+    "client-fingerprint": tls?.utls?.fingerprint,
+    "domain-strategy": item.domain_strategy,
+    "network-strategy": item.network_strategy
   };
   if (transport?.type === "ws") {
     node.network = "ws";
     node["ws-opts"] = { path: transport.path || "/", headers: transport.headers };
   } else if (transport?.type === "http") {
     node.network = "h2";
-    node["h2-opts"] = { path: transport.path || "/", host: transport.host };
+    node["h2-opts"] = { path: transport.path || "/", host: transport.host, headers: transport.headers };
   } else if (transport?.type === "grpc") {
     node.network = "grpc";
     node["grpc-opts"] = { "grpc-service-name": transport.service_name };
@@ -424,11 +459,15 @@ function normalizeSingBoxOutbound(item) {
   if (type === "hysteria" || type === "hysteria2") {
     node.up = item.up;
     node.down = item.down;
-    node.obfs = item.obfs?.password ?? item.obfs?.type;
+    node.obfs = item.obfs?.type;
+    node["obfs-password"] = item.obfs?.password;
   }
   if (type === "tuic") {
     node.congestion_controller = item.congestion_control;
     node.udp_relay_mode = item.udp_relay_mode;
+    node.heartbeat = item.heartbeat;
+    node.zero_rtt_handshake = item.zero_rtt_handshake;
+    node.reduce_rtt = item.reduce_rtt;
   }
   if (type === "anytls") {
     node["idle-session-check-interval"] = item.idle_session_check_interval;

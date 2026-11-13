@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildAggregateCandidate, buildCandidate, buildPreview, decidePublication } from "../src/core.js";
+import { buildAggregateCandidate, buildCandidate, buildPreview, decidePublication, deduplicateNodes } from "../src/core.js";
 import { applyRename, decodeSubscription, parseShareLink } from "../src/codec.js";
 import { detectTarget, renderSubscription } from "../src/formats.js";
 
@@ -157,6 +157,21 @@ test("merges published nodes from multiple sources for one aggregate candidate",
   assert.match(candidate.output, /backup\.example\.com/);
 });
 
+test("deduplicates nodes when every field except the name is identical", () => {
+  const base = {
+    name: "线路 B",
+    type: "vless",
+    server: "same.example.com",
+    port: 443,
+    uuid: "11111111-1111-1111-1111-111111111111",
+    tls: true,
+    sni: "same.example.com"
+  };
+  const unique = deduplicateNodes([{ ...base, name: "线路 B" }, { ...base, name: "线路 A" }]);
+  assert.equal(unique.length, 1);
+  assert.equal(unique[0].name, "线路 A");
+});
+
 test("places custom aggregate nodes at the selected edge", async () => {
   const sourceNodes = (await buildCandidate(sampleClash)).nodes;
   const customNodes = decodeSubscription("vless://11111111-1111-1111-1111-111111111111@custom.example.com:443?security=tls#Custom");
@@ -292,7 +307,7 @@ test("renders multiple client formats and detects common client user agents", as
   const shadowrocketRequest = new Request("https://worker.example.com/sub/token", {
     headers: { "user-agent": "Shadowrocket/2.2" }
   });
-  assert.equal(detectTarget(shadowrocketRequest), "base64");
+  assert.equal(detectTarget(shadowrocketRequest), "surge");
   assert.equal(detectTarget(new Request("https://worker.example.com/sub/token?target=sing-box")), "sing-box");
 
   const links = renderSubscription(candidate.nodes, "links");
@@ -304,6 +319,10 @@ test("renders multiple client formats and detects common client user agents", as
   const singBox = renderSubscription(candidate.nodes, "sing-box");
   assert.equal(JSON.parse(singBox.body).outbounds[0].tag, "PROXY");
   assert.equal(JSON.parse(singBox.body).outbounds[0].type, "urltest");
+  const surge = renderSubscription(candidate.nodes, "surge");
+  assert.match(surge.body, /\[Proxy\]/);
+  assert.match(surge.body, /\[Proxy Group\]/);
+  assert.match(surge.body, /url-test/);
 });
 
 test("renders configurable Clash rule providers and expands all nodes in proxy groups", async () => {

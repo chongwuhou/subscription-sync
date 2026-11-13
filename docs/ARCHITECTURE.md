@@ -4,11 +4,13 @@
 
 1. A scheduled refresh reads one or more operator-configured source profiles.
 2. Each profile is processed sequentially, so one upstream provider is not hit by a burst of parallel requests.
-3. Each response is parsed as Clash YAML, JSON, or a Base64/share-link list.
+3. Each response is parsed as Clash YAML, JSON, or a Base64/share-link list; normalized nodes retain protocol fields needed by Clash/Mihomo and sing-box output.
 4. Nodes are normalized, renamed, structurally validated, deduplicated, and sorted per profile.
 5. A canonical hash is calculated after normalization. This prevents an upstream reorder from being treated as a real change.
 6. Each profile is published only when its valid-node threshold is met and its hash differs from its own last good version.
-7. Each public URL serves only the last good generated Clash YAML for its own profile.
+7. Each public URL serves only the last good generated state for its own profile and renders Clash/Mihomo, Base64 links, sing-box, or native Surge format according to the client or `target` parameter.
+8. After the first successful fetch, the Worker sends `If-None-Match` / `If-Modified-Since` when validators are available; transient upstream failures use bounded retries, while invalid/empty responses fall back to the last valid D1 snapshot.
+9. D1 snapshots are content-versioned, retention-pruned, and chunked before storage when the normalized node JSON is large.
 
 ## Deliberate safety properties
 

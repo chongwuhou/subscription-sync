@@ -24,7 +24,13 @@ const CONTROL_SETTINGS_KEY = "settings";
 const CONTROL_EXPIRED_KEY = "expired-subscription";
 const CONTROL_AGGREGATE_TOKEN_KEY = "aggregate-public-token";
 const DEFAULT_REFRESH_INTERVAL_MINUTES = 30;
+const DEFAULT_SOURCE_SNAPSHOT_RETENTION = 30;
+const MAX_INLINE_SNAPSHOT_BYTES = 1_500_000;
+// Stay well below D1 statement/row limits so a single chunk cannot make a
+// snapshot write fail because of SQL parameter size.
+const MAX_SNAPSHOT_CHUNK_BYTES = 64 * 1024;
 let sourceSnapshotSchemaPromise = null;
+let sourceSnapshotChunkSchemaPromise = null;
 let controlPlaneSchemaPromise = null;
 
 const ADMIN_HTML = `<!doctype html>
@@ -715,7 +721,7 @@ const ADMIN_HTML = `<!doctype html>
         filterSection.appendChild(filterRules);
         const transformSection = createProfileSection(card, "改名与客户端兼容", "默认只改节点名称；需要时再启用高级字段替换", false);
         addCheckbox(transformSection, "paused", "暂停自动更新（固定当前已发布版本）", profile.paused === true);
-        addField(transformSection, "defaultTarget", "无法识别客户端时的格式（clash / base64 / sing-box / links）", profile.defaultTarget || "clash", "text", "clash");
+        addField(transformSection, "defaultTarget", "无法识别客户端时的格式（clash / base64 / sing-box / surge / links）", profile.defaultTarget || "clash", "text", "clash");
         addCheckbox(transformSection, "replaceAllFields", "允许替换节点全部字段（高级；默认只替换名称）", profile.replaceAllFields);
         const renameRulesEditor = renderRenameRulesEditor(transformSection, profile.renameRules || []);
         const actionsSection = createProfileSection(card, "预览与操作", "先预览规则结果，确认无误后保存", false);
@@ -905,20 +911,82 @@ async function readResponseWithLimit(response, maxBytes) {
   return new TextDecoder().decode(merged);
 }
 
-async function fetchSource(env, profile) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Number(env.SOURCE_TIMEOUT_MS ?? 15000));
-  try {
-    const response = await fetch(getSourceUrl(env, profile), {
-      method: "GET",
-      redirect: "follow",
-      signal: controller.signal,
-      headers: { accept: "text/plain, text/yaml, application/json;q=0.9, */*;q=0.1" }
-    });
-    return await readResponseWithLimit(response, Number(env.MAX_SOURCE_BYTES ?? DEFAULT_MAX_SOURCE_BYTES));
-  } finally {
-    clearTimeout(timeout);
+function sourceRetryCount(env) {
+  const value = Number(env.SOURCE_RETRY_COUNT ?? 2);
+  return Number.isFinite(value) ? Math.min(3, Math.max(0, Math.floor(value))) : 2;
+}
+
+function retryableSourceStatus(status) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function retryDelayMs(attempt, response) {
+  const retryAfter = Number(response?.headers?.get("retry-after"));
+  if (Number.isFinite(retryAfter) && retryAfter >= 0) return Math.min(5000, retryAfter * 1000);
+  return Math.min(4000, 500 * (2 ** attempt));
+}
+
+function isChallengePage(text, response) {
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.includes("text/html")) return false;
+  return /just a moment|attention required|cf-chl-|cloudflare/i.test(String(text).slice(0, 20000));
+}
+
+async function fetchSource(env, profile, previous = null) {
+  const sourceUrl = getSourceUrl(env, profile);
+  const retries = sourceRetryCount(env);
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), Number(env.SOURCE_TIMEOUT_MS ?? 15000));
+    const headers = {
+      accept: "text/plain, text/yaml, application/json;q=0.9, */*;q=0.1",
+      "user-agent": String(env.SOURCE_USER_AGENT ?? "SubscriptionSync/1.0")
+    };
+    if (previous?.sourceEtag) headers["if-none-match"] = previous.sourceEtag;
+    if (previous?.sourceLastModified) headers["if-modified-since"] = previous.sourceLastModified;
+    try {
+      const response = await fetch(sourceUrl, {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+        headers
+      });
+      if (response.status === 304) {
+        return {
+          notModified: true,
+          etag: response.headers.get("etag") || previous?.sourceEtag || "",
+          lastModified: response.headers.get("last-modified") || previous?.sourceLastModified || ""
+        };
+      }
+      if (!response.ok) {
+        if (retryableSourceStatus(response.status) && attempt < retries) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs(attempt, response)));
+          continue;
+        }
+        throw new Error(`source-http-${response.status}`);
+      }
+      const text = await readResponseWithLimit(response, Number(env.MAX_SOURCE_BYTES ?? DEFAULT_MAX_SOURCE_BYTES));
+      if (isChallengePage(text, response)) throw new Error("source-challenge-page");
+      return {
+        text,
+        etag: response.headers.get("etag") || "",
+        lastModified: response.headers.get("last-modified") || ""
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      const retryableError = !message.startsWith("source-http-")
+        && message !== "source-challenge-page"
+        && message !== "Source response is too large";
+      if (attempt < retries && retryableError) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs(attempt)));
+        continue;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
+  throw new Error("source-retry-exhausted");
 }
 
 async function loadState(env, profileId) {
@@ -1477,20 +1545,28 @@ async function handleAdminApi(request, env, url) {
       const nodeNameInclude = typeof body?.nodeNameInclude === "string" ? body.nodeNameInclude : profile.nodeNameInclude;
       const nodeNameIncludeAll = typeof body?.nodeNameIncludeAll === "string" ? body.nodeNameIncludeAll : profile.nodeNameIncludeAll;
       const nodeNameExclude = typeof body?.nodeNameExclude === "string" ? body.nodeNameExclude : profile.nodeNameExclude;
+      const previous = await loadState(env, profile.id);
       let preview;
       let source = "live";
       try {
-        const rawText = await fetchSource(env, profile);
-        preview = buildPreview(rawText, { renameRules, replaceAllFields, nodeNameInclude, nodeNameIncludeAll, nodeNameExclude });
+        const sourceResponse = await fetchSource(env, profile, previous);
+        if (sourceResponse.notModified) {
+          const sourceNodes = Array.isArray(previous?.sourceNodes) && previous.sourceNodes.length > 0
+            ? previous.sourceNodes
+            : previous?.nodes;
+          if (!Array.isArray(sourceNodes) || sourceNodes.length === 0) throw new Error("source-not-modified-without-history");
+          preview = buildPreviewFromNodes(sourceNodes, { renameRules, replaceAllFields, nodeNameInclude, nodeNameIncludeAll, nodeNameExclude });
+        } else {
+          preview = buildPreview(sourceResponse.text, { renameRules, replaceAllFields, nodeNameInclude, nodeNameIncludeAll, nodeNameExclude });
+        }
         if (preview.original.length === 0 || preview.modified.length === 0) throw new Error("latest-source-has-no-valid-nodes");
       } catch (liveError) {
         const historicalNodes = await loadLatestSourceSnapshot(env, profile.id);
-        const state = await loadState(env, profile.id);
         const fallbackNodes = historicalNodes?.length
           ? historicalNodes
-          : Array.isArray(state?.sourceNodes) && state.sourceNodes.length > 0
-            ? state.sourceNodes
-            : state?.nodes;
+          : Array.isArray(previous?.sourceNodes) && previous.sourceNodes.length > 0
+            ? previous.sourceNodes
+            : previous?.nodes;
         if (!fallbackNodes?.length) throw liveError;
         preview = buildPreviewFromNodes(fallbackNodes, { renameRules, replaceAllFields, nodeNameInclude, nodeNameIncludeAll, nodeNameExclude });
         if (preview.original.length === 0 || preview.modified.length === 0) throw liveError;
@@ -1531,7 +1607,25 @@ async function saveState(env, profileId, state) {
 }
 
 async function publishDecision(env, profileId, decision, now, metadata = {}) {
-  if (decision.action === "keep") return decision;
+  const hasEtag = Object.prototype.hasOwnProperty.call(metadata, "sourceEtag");
+  const hasLastModified = Object.prototype.hasOwnProperty.call(metadata, "sourceLastModified");
+  if (decision.action === "keep") {
+    if (hasEtag || hasLastModified) {
+      const previous = await loadState(env, profileId);
+      if (previous) {
+        await saveState(env, profileId, {
+          ...previous,
+          ...(hasEtag ? { sourceEtag: String(metadata.sourceEtag ?? "") } : {}),
+          ...(hasLastModified ? { sourceLastModified: String(metadata.sourceLastModified ?? "") } : {}),
+          validCount: decision.validCount ?? previous.validCount,
+          lastRefreshAt: now.toISOString(),
+          lastAction: decision.action,
+          lastReason: decision.reason
+        });
+      }
+    }
+    return decision;
+  }
   await saveState(env, profileId, {
     version: 1,
     subscriptionId: profileId,
@@ -1546,7 +1640,9 @@ async function publishDecision(env, profileId, decision, now, metadata = {}) {
     lastReason: decision.reason,
     sourceNodes: decision.sourceNodes ?? decision.nodes,
     nodes: decision.nodes,
-    output: decision.output
+    output: decision.output,
+    ...(hasEtag ? { sourceEtag: String(metadata.sourceEtag ?? "") } : {}),
+    ...(hasLastModified ? { sourceLastModified: String(metadata.sourceLastModified ?? "") } : {})
   });
   return decision;
 }
@@ -1557,14 +1653,115 @@ async function writeSourceSnapshot(env, profileId, candidate, now) {
     if (!await ensureSourceSnapshotSchema(env)) return false;
     const nodes = Array.isArray(candidate.sourceNodes) ? candidate.sourceNodes : [];
     if (nodes.length === 0) return false;
+    const serialized = JSON.stringify(nodes);
+    const serializedBytes = new TextEncoder().encode(serialized).byteLength;
+    let inlineJson = serialized;
+    let chunks = null;
+    if (serializedBytes > MAX_INLINE_SNAPSHOT_BYTES) {
+      chunks = splitSnapshotChunks(nodes);
+      if (!chunks || !await ensureSourceSnapshotChunkSchema(env)) {
+        console.log(JSON.stringify({ event: "source-snapshot-write-skipped", reason: "snapshot-too-large", subscriptionId: profileId, bytes: serializedBytes }));
+        return false;
+      }
+      inlineJson = "";
+    }
     await env.SUBSCRIPTION_AUDIT
       .prepare("INSERT OR IGNORE INTO source_snapshots (subscription_id, captured_at, source_content_hash, valid_count, nodes_json) VALUES (?, ?, ?, ?, ?)")
-      .bind(profileId, now.toISOString(), candidate.sourceContentHash, candidate.sourceValidCount ?? nodes.length, JSON.stringify(nodes))
+      .bind(profileId, now.toISOString(), candidate.sourceContentHash, candidate.sourceValidCount ?? nodes.length, inlineJson)
       .run();
+    const row = await env.SUBSCRIPTION_AUDIT
+      .prepare("SELECT id, nodes_json FROM source_snapshots WHERE subscription_id = ? AND source_content_hash = ? LIMIT 1")
+      .bind(profileId, candidate.sourceContentHash)
+      .first();
+    if (!row?.id) return false;
+    if (chunks && !row.nodes_json) {
+      for (let index = 0; index < chunks.length; index += 1) {
+        await env.SUBSCRIPTION_AUDIT
+          .prepare("INSERT OR REPLACE INTO source_snapshot_chunks (snapshot_id, chunk_index, chunk_json) VALUES (?, ?, ?)")
+          .bind(row.id, index, JSON.stringify(chunks[index]))
+          .run();
+      }
+    }
+    await pruneSourceSnapshots(env, profileId);
     return true;
   } catch {
     console.log(JSON.stringify({ event: "source-snapshot-write-failed" }));
     return false;
+  }
+}
+
+function snapshotRetention(env) {
+  const value = Number(env.SOURCE_SNAPSHOT_RETENTION ?? DEFAULT_SOURCE_SNAPSHOT_RETENTION);
+  return Number.isFinite(value) ? Math.min(100, Math.max(3, Math.floor(value))) : DEFAULT_SOURCE_SNAPSHOT_RETENTION;
+}
+
+function splitSnapshotChunks(nodes) {
+  const chunks = [];
+  let current = [];
+  for (const node of nodes) {
+    const candidate = [...current, node];
+    const bytes = new TextEncoder().encode(JSON.stringify(candidate)).byteLength;
+    if (bytes > MAX_SNAPSHOT_CHUNK_BYTES && current.length > 0) {
+      chunks.push(current);
+      current = [node];
+      if (new TextEncoder().encode(JSON.stringify(current)).byteLength > MAX_SNAPSHOT_CHUNK_BYTES) return null;
+    } else if (bytes > MAX_SNAPSHOT_CHUNK_BYTES) {
+      return null;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+async function readSnapshotNodes(env, row) {
+  if (row?.nodes_json) {
+    try {
+      const nodes = JSON.parse(row.nodes_json);
+      return Array.isArray(nodes) ? nodes : null;
+    } catch {
+      return null;
+    }
+  }
+  if (!row?.id || !await ensureSourceSnapshotChunkSchema(env)) return null;
+  const result = await env.SUBSCRIPTION_AUDIT
+    .prepare("SELECT chunk_json FROM source_snapshot_chunks WHERE snapshot_id = ? ORDER BY chunk_index ASC")
+    .bind(row.id)
+    .all();
+  const nodes = [];
+  for (const chunk of Array.isArray(result?.results) ? result.results : []) {
+    const parsed = JSON.parse(chunk.chunk_json);
+    if (!Array.isArray(parsed)) return null;
+    nodes.push(...parsed);
+  }
+  return nodes.length > 0 ? nodes : null;
+}
+
+async function pruneSourceSnapshots(env, profileId) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare) return;
+  try {
+    const result = await env.SUBSCRIPTION_AUDIT
+      .prepare("SELECT id, source_content_hash FROM source_snapshots WHERE subscription_id = ? ORDER BY captured_at DESC, id DESC")
+      .bind(profileId)
+      .all();
+    const rows = Array.isArray(result?.results) ? result.results : [];
+    if (rows.length <= snapshotRetention(env)) return;
+    const protectedHash = (await loadState(env, profileId))?.sourceContentHash;
+    const keep = new Set(rows.slice(0, snapshotRetention(env)).map((row) => String(row.id)));
+    if (protectedHash) {
+      const protectedRow = rows.find((row) => row.source_content_hash === protectedHash);
+      if (protectedRow) keep.add(String(protectedRow.id));
+    }
+    for (const row of rows) {
+      if (keep.has(String(row.id))) continue;
+      if (await ensureSourceSnapshotChunkSchema(env)) {
+        await env.SUBSCRIPTION_AUDIT.prepare("DELETE FROM source_snapshot_chunks WHERE snapshot_id = ?").bind(row.id).run();
+      }
+      await env.SUBSCRIPTION_AUDIT.prepare("DELETE FROM source_snapshots WHERE id = ?").bind(row.id).run();
+    }
+  } catch {
+    console.log(JSON.stringify({ event: "source-snapshot-prune-failed", subscriptionId: profileId }));
   }
 }
 
@@ -1573,12 +1770,10 @@ async function loadLatestSourceSnapshot(env, profileId) {
   try {
     if (!await ensureSourceSnapshotSchema(env)) return null;
     const result = await env.SUBSCRIPTION_AUDIT
-      .prepare("SELECT nodes_json FROM source_snapshots WHERE subscription_id = ? ORDER BY captured_at DESC, id DESC LIMIT 1")
+      .prepare("SELECT id, nodes_json FROM source_snapshots WHERE subscription_id = ? ORDER BY captured_at DESC, id DESC LIMIT 1")
       .bind(profileId)
       .first();
-    if (!result?.nodes_json) return null;
-    const nodes = JSON.parse(result.nodes_json);
-    return Array.isArray(nodes) ? nodes : null;
+    return await readSnapshotNodes(env, result);
   } catch {
     return null;
   }
@@ -1663,9 +1858,8 @@ async function loadSourceSnapshotByHash(env, profileId, sourceContentHash) {
       .prepare("SELECT id, captured_at, source_content_hash, valid_count, nodes_json FROM source_snapshots WHERE subscription_id = ? AND source_content_hash = ? ORDER BY id DESC LIMIT 1")
       .bind(profileId, sourceContentHash)
       .first();
-    if (!result?.nodes_json) return null;
-    const nodes = JSON.parse(result.nodes_json);
-    if (!Array.isArray(nodes)) return null;
+    const nodes = await readSnapshotNodes(env, result);
+    if (!nodes) return null;
     return {
       versionId: String(result.id ?? ""),
       capturedAt: String(result.captured_at ?? ""),
@@ -1692,6 +1886,22 @@ async function ensureSourceSnapshotSchema(env) {
       });
   }
   return sourceSnapshotSchemaPromise;
+}
+
+async function ensureSourceSnapshotChunkSchema(env) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare) return false;
+  if (!sourceSnapshotChunkSchemaPromise) {
+    sourceSnapshotChunkSchemaPromise = env.SUBSCRIPTION_AUDIT
+      .prepare("CREATE TABLE IF NOT EXISTS source_snapshot_chunks (snapshot_id INTEGER NOT NULL, chunk_index INTEGER NOT NULL, chunk_json TEXT NOT NULL, PRIMARY KEY (snapshot_id, chunk_index))")
+      .bind()
+      .run()
+      .then(() => true)
+      .catch(() => {
+        sourceSnapshotChunkSchemaPromise = null;
+        return false;
+      });
+  }
+  return sourceSnapshotChunkSchemaPromise;
 }
 
 async function writeAudit(env, profileId, result, now) {
@@ -1778,9 +1988,9 @@ async function refreshProfile(env, profile, now, settings = null) {
   }
   const previous = await loadState(env, profile.id);
   const currentSettings = settings ?? await loadSettings(env);
-  let rawText;
+  let sourceResponse;
   try {
-    rawText = await fetchSource(env, profile);
+    sourceResponse = await fetchSource(env, profile, previous);
   } catch (error) {
     const fallback = await reprocessStoredProfile(env, profile, now, currentSettings, previous, "source-unavailable-use-last-good");
     return finish(fallback.reason === "no-historical-valid-nodes" ? {
@@ -1792,7 +2002,7 @@ async function refreshProfile(env, profile, now, settings = null) {
 
   let candidate;
   try {
-    candidate = await buildCandidate(rawText, {
+    const candidateOptions = {
       renameRules: profile.renameRules,
       nodeNameInclude: profile.nodeNameInclude,
       nodeNameIncludeAll: profile.nodeNameIncludeAll,
@@ -1800,7 +2010,16 @@ async function refreshProfile(env, profile, now, settings = null) {
       replaceAllFields: profile.replaceAllFields,
       minValidNodes: profile.minValidNodes,
       clashConfig: currentSettings.clashConfig
-    });
+    };
+    if (sourceResponse.notModified) {
+      const sourceNodes = Array.isArray(previous?.sourceNodes) && previous.sourceNodes.length > 0
+        ? previous.sourceNodes
+        : previous?.nodes;
+      if (!Array.isArray(sourceNodes) || sourceNodes.length === 0) throw new Error("source-not-modified-without-history");
+      candidate = await buildCandidateFromNodes(sourceNodes, candidateOptions);
+    } else {
+      candidate = await buildCandidate(sourceResponse.text, candidateOptions);
+    }
   } catch (error) {
     const fallback = await reprocessStoredProfile(env, profile, now, currentSettings, previous, "latest-parse-error-use-last-good");
     return finish(fallback.reason === "no-historical-valid-nodes" ? {
@@ -1816,7 +2035,10 @@ async function refreshProfile(env, profile, now, settings = null) {
     const fallback = await reprocessStoredProfile(env, profile, now, currentSettings, previous, "latest-invalid-use-last-good");
     return finish(fallback.reason === "no-historical-valid-nodes" ? decision : fallback);
   }
-  return finish(await publishDecision(env, profile.id, decision, now));
+  return finish(await publishDecision(env, profile.id, decision, now, {
+    sourceEtag: sourceResponse.etag,
+    sourceLastModified: sourceResponse.lastModified
+  }));
 }
 
 export async function refreshAll(env, now = new Date()) {

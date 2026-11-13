@@ -19,8 +19,7 @@ id = "replace-with-an-approved-kv-namespace-id"
 crons = ["*/5 * * * *"]
 
 # Enable this binding for the D1 control plane, refresh audit history and source snapshots.
-# Apply migrations/0001_audit.sql, migrations/0002_source_snapshots.sql and
-# migrations/0003_control_plane.sql.
+# Apply migrations/0001_audit.sql through migrations/0004_source_snapshot_chunks.sql.
 # Snapshots store normalized valid node JSON for offline rule reprocessing;
 # they do not store source URLs or Tokens, but may contain node credentials.
 [[d1_databases]]
@@ -35,4 +34,7 @@ migrations_dir = "migrations"
 # should be configured as secrets or private environment variables by the
 # operator. SUBSCRIPTIONS_JSON takes precedence over the single-subscription
 # variables.
+# Optional hardening knobs:
+# SOURCE_RETRY_COUNT = "2"
+# SOURCE_SNAPSHOT_RETENTION = "30"
 

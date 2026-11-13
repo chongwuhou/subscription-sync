@@ -19,7 +19,7 @@
 
 生产部署的构建变量 `WRANGLER_SEND_METRICS=false` 已关闭 Wrangler 匿名遥测，`preview_urls = false` 已关闭预览链接。生产固定地址仍使用 `workers.dev`，方便后续生成稳定订阅链接。
 
-D1 是生产控制面的最终来源。启用 `SUBSCRIPTION_AUDIT` 后，运行 `migrations/0001_audit.sql`、`migrations/0002_source_snapshots.sql` 和 `migrations/0003_control_plane.sql`。`subscription_control` 保存后台订阅配置、刷新设置、汇总 Token 和过期地址；首次读取时会把旧 KV 配置迁移到 D1，之后以 D1 为准，KV 只作兼容缓存。除刷新审计外，`source_snapshots` 会保存每个源的历史有效节点 JSON，并按源内容哈希去重；源站暂时不可用时，Worker 会读取最近快照重新套用当前规则。控制表和节点 JSON 可能包含源地址、Token、UUID、密码等敏感凭据，应限制 D1 管理访问。
+D1 是生产控制面的最终来源。启用 `SUBSCRIPTION_AUDIT` 后，运行 `migrations/0001_audit.sql` 至 `migrations/0004_source_snapshot_chunks.sql`。`subscription_control` 保存后台订阅配置、刷新设置、汇总 Token 和过期地址；首次读取时会把旧 KV 配置迁移到 D1，之后以 D1 为准，KV 只作兼容缓存。除刷新审计外，`source_snapshots` 会保存每个源的历史有效节点 JSON，并按源内容哈希去重；默认保留最近 30 个不同版本，并额外保护当前正在使用的版本。超过安全大小的历史快照会写入 `source_snapshot_chunks` 分块表，无法安全分块时只跳过这次历史写入，不会覆盖现有发布版本。源站暂时不可用时，Worker 会读取最近快照重新套用当前规则。节点 JSON 可能包含 UUID、密码等敏感凭据，应限制 D1 管理访问。
 
 ## 多订阅配置
 
@@ -45,11 +45,12 @@ Worker 为每个 `id` 使用独立的 KV key：`published-state-v1:<id>`，公�
 同一个固定链接会根据请求头自动选择格式：
 
 - Clash、Clash Meta、Mihomo、Stash：Clash/Mihomo YAML。
-- V2RayN、V2RayNG、Shadowrocket、Surge、Loon、Quantumult X 等：Base64 分享链接。
+- V2RayN、V2RayNG、Loon、Quantumult X 等：Base64 分享链接。
+- Shadowrocket、Surge：原生 Surge `[Proxy]` / `[Proxy Group]` 配置。
 - sing-box：sing-box JSON。
 - 无法判断时：Clash/Mihomo YAML。
 
-也可以用查询参数强制格式：`?target=clash`、`?target=base64`、`?target=sing-box`、`?target=links`。查询参数只选择输出格式，不允许传入或覆盖订阅源地址。
+也可以用查询参数强制格式：`?target=clash`、`?target=base64`、`?target=sing-box`、`?target=surge`、`?target=links`。查询参数只选择输出格式，不允许传入或覆盖订阅源地址。
 
 ## 私有配置
 
@@ -68,7 +69,7 @@ Worker 为每个 `id` 使用独立的 KV key：`published-state-v1:<id>`，公�
 
 部署后访问 `/admin`，输入 `ADMIN_TOKEN` 即可管理多个源和刷新间隔。后台保存的订阅配置写入受保护的 D1，并同步 KV 兼容缓存；管理员 API 不接受公开源地址参数，且不把源地址写入日志。后台状态面板显示最近刷新结果、有效节点数和历史源使用情况。
 
-后台“改名规则 JSON”示例：
+后台勾选“正则模式”时的改名规则示例：
 
 ```json
 [
@@ -81,18 +82,22 @@ Worker 为每个 `id` 使用独立的 KV key：`published-state-v1:<id>`，公�
 配置保存到 KV 后，重新打开后台仍会保留；6 小时和 24 小时分别填写 `360` 和 `1440` 分钟。
 - `SOURCE_TIMEOUT_MS`：默认 `15000`。
 - `MAX_SOURCE_BYTES`：默认 `5242880`。
+- `SOURCE_RETRY_COUNT`：额外重试次数，默认 `2`，范围 `0-3`；只对网络错误、超时、408/425/429 和 5xx 重试。
+- `SOURCE_SNAPSHOT_RETENTION`：每个订阅保留的不同历史源版本数，默认 `30`，范围 `3-100`。
 - `ALLOW_HTTP_SOURCE=true`：只有上游确实没有 HTTPS 时才启用。
 
 ## 发布行为
 
 Cron 触发器执行刷新：
 
-1. Worker 读取私有 `SOURCE_URL`，或读取多订阅的 `SUBSCRIPTIONS_JSON`。
+1. Worker 读取私有 `SOURCE_URL`，或读取多订阅的 `SUBSCRIPTIONS_JSON`；已有版本会带上 `If-None-Match` / `If-Modified-Since` 条件请求。
 2. 解析、重命名、去重、排序并验证节点。
 3. 没有有效节点时保留 KV 中的最后成功版本。
 4. 内容哈希不变时不写 KV。
 5. 内容有效且哈希变化时才替换 KV 中的发布版本。
 6. 公共链接只读取 KV，不会把上游地址暴露给客户端。
+
+如果源站返回 `304 Not Modified`，Worker 会直接基于最近有效源节点重新执行当前规则，不重复下载内容；临时失败会有限重试，非临时 4xx、Cloudflare 挑战页和超大响应会立即进入历史回退流程。
 
 首次没有成功版本时，如果上游为空或解析失败，公共链接返回 `503`，不会生成空订阅。
 
