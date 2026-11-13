@@ -41,10 +41,12 @@ proxies:
     port: 443
     password: test-password
     sni: anytls.example.com
+    alpn:
 `);
   assert.equal(candidate.valid, true);
   assert.equal(candidate.validCount, 1);
   assert.match(candidate.output, /type: anytls/);
+  assert.match(candidate.output, /alpn: \[\]/);
 });
 
 test("filters source names before rename and keeps the unfiltered history", async () => {

@@ -573,6 +573,9 @@ export function normalizeNode(input, renameRules = [], options = {}) {
   if (replaceAllFields) {
     Object.assign(node, replaceTextFields(node, renameRules));
   }
+  for (const key of ["alpn", "allowed-ips", "local-address", "reserved"]) {
+    if (node[key] && !Array.isArray(node[key]) && typeof node[key] === "object" && Object.keys(node[key]).length === 0) node[key] = [];
+  }
   node.type = String(node.type ?? "").toLowerCase();
   node.server = String(node.server ?? "").trim();
   node.port = Number(node.port);
