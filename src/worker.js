@@ -113,7 +113,14 @@ const ADMIN_HTML = `<!doctype html>
     .expired-card[open] > summary::after { content: "−"; background: rgba(224,235,255,.88); }
     .expired-card-body { padding-top: .35rem; }
     .auto-expired-list { margin-top: .55rem; padding: .7rem; border: 1px solid rgba(121,151,221,.2); border-radius: 14px; background: rgba(255,255,255,.38); }
-    .auto-expired-row { overflow-wrap: anywhere; padding: .42rem 0; color: #53658a; font-size: .86rem; line-height: 1.45; border-bottom: 1px solid rgba(113,137,185,.12); }
+    .auto-expired-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(9.5rem, auto); gap: .7rem; align-items: center; overflow-wrap: anywhere; padding: .55rem 0; color: #53658a; font-size: .86rem; line-height: 1.45; border-bottom: 1px solid rgba(113,137,185,.12); }
+    .auto-expired-meta { min-width: 0; }
+    .auto-expired-meta strong { display: block; color: #304779; }
+    .auto-expired-meta small { display: block; margin-top: .12rem; overflow-wrap: anywhere; }
+    .auto-expired-date { margin: 0; }
+    .auto-expired-date input { margin-top: 0; min-width: 9.5rem; }
+    .auto-expired-row.is-expired .auto-expired-meta strong { color: #8a4251; }
+    @media (max-width: 620px) { .auto-expired-row { grid-template-columns: 1fr; } .auto-expired-date input { width: 100%; } }
     .auto-expired-row:last-child { border-bottom: 0; }
     .profile-card { margin: 1rem 0; padding: .35rem .85rem .95rem; border: 1px solid var(--line); border-radius: 22px; background: rgba(255,255,255,.42); box-shadow: 0 18px 48px rgba(43,65,120,.08), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(20px) saturate(135%); }
     .profile-card > summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; cursor: pointer; font-weight: 750; padding: .8rem .35rem; color: #233c7e; list-style: none; }
@@ -512,14 +519,16 @@ const ADMIN_HTML = `<!doctype html>
       distributionCard.appendChild(distributionTitle);
       const distributionNote = document.createElement("p");
       distributionNote.className = "muted";
-      distributionNote.textContent = "每行对应一个用户：备注只供你在后台识别；选择到期日期后，系统会自动生成“到期日期”提示节点，并在到期当天把该地址纳入下方旧汇总地址。";
+      distributionNote.textContent = "每行对应一个用户：备注只供你在后台识别；到期日期会生成“到期日期”提示节点。续费时可在下方自动列表直接改日期，保存后会自动恢复正常分发。";
       distributionCard.appendChild(distributionNote);
       const distributionRows = document.createElement("div");
       distributionRows.dataset.distributionRows = "true";
+      const distributionRowsByToken = new Map();
       const addDistributionRow = (item = {}) => {
         const row = document.createElement("div");
         row.className = "distribution-row";
         row.dataset.distributionRow = "true";
+        row.dataset.distributionToken = item.publicToken || "";
         const noteLabel = document.createElement("label");
         noteLabel.textContent = "备注名称（仅自己可见）";
         const noteInput = document.createElement("input");
@@ -562,6 +571,7 @@ const ADMIN_HTML = `<!doctype html>
         removeButton.onclick = () => row.remove();
         row.appendChild(removeButton);
         distributionRows.appendChild(row);
+        if (item.publicToken) distributionRowsByToken.set(item.publicToken, row);
       };
       (state.distributionSubscriptions || []).forEach(addDistributionRow);
       distributionCard.appendChild(distributionRows);
@@ -600,10 +610,10 @@ const ADMIN_HTML = `<!doctype html>
       ));
       const expiredNote = document.createElement("p");
       expiredNote.className = "muted";
-      expiredNote.textContent = "手动旧地址仍按上面配置；用户分发地址到期后会自动加入下面的自动列表，并返回过期提示节点，不需要手动复制。";
+      expiredNote.textContent = "手动旧地址仍按上面配置；用户分发地址到期后会自动纳入过期逻辑。续费时直接修改下面的日期并点击底部“保存订阅配置”，日期恢复到未来后，该分发地址会自动恢复正常节点。";
       expiredBody.appendChild(expiredNote);
       const autoExpiredTitle = document.createElement("strong");
-      autoExpiredTitle.textContent = "自动到期分发地址（只读）";
+      autoExpiredTitle.textContent = "自动到期分发地址（可调整日期）";
       expiredBody.appendChild(autoExpiredTitle);
       const autoExpiredList = document.createElement("div");
       autoExpiredList.className = "auto-expired-list";
@@ -618,8 +628,36 @@ const ADMIN_HTML = `<!doctype html>
         distributionItems.forEach((item) => {
           const autoRow = document.createElement("div");
           autoRow.className = "auto-expired-row";
-          const expired = item.expiresOn && item.expiresOn <= chinaDate;
-          autoRow.textContent = (item.note || "未备注") + "｜到期 " + (item.expiresOn || "未设置日期") + "｜" + (expired ? "已自动进入旧汇总" : "到期后自动进入") + "｜" + publicLinkFor(item.publicToken);
+          const autoMeta = document.createElement("div");
+          autoMeta.className = "auto-expired-meta";
+          const autoName = document.createElement("strong");
+          autoName.textContent = item.note || "未备注";
+          autoMeta.appendChild(autoName);
+          const autoStatus = document.createElement("small");
+          autoMeta.appendChild(autoStatus);
+          autoRow.appendChild(autoMeta);
+          const autoDateLabel = document.createElement("label");
+          autoDateLabel.className = "auto-expired-date";
+          autoDateLabel.textContent = "到期日期";
+          const autoDateInput = document.createElement("input");
+          autoDateInput.type = "date";
+          autoDateInput.value = item.expiresOn || "";
+          autoDateInput.dataset.autoDistributionExpiry = item.publicToken || "";
+          autoDateLabel.appendChild(autoDateInput);
+          autoRow.appendChild(autoDateLabel);
+          const updateAutoStatus = () => {
+            const expiry = autoDateInput.value.trim();
+            const expired = expiry && expiry <= chinaDate;
+            autoRow.classList.toggle("is-expired", Boolean(expired));
+            autoStatus.textContent = (expiry || "未设置日期") + "｜" + (expired ? "已自动进入旧汇总" : "到期后自动进入") + "｜" + publicLinkFor(item.publicToken);
+          };
+          autoDateInput.addEventListener("input", () => {
+            const distributionRow = distributionRowsByToken.get(item.publicToken);
+            const distributionDateInput = distributionRow?.querySelector("[data-distribution-expiry='true']");
+            if (distributionDateInput) distributionDateInput.value = autoDateInput.value;
+            updateAutoStatus();
+          });
+          updateAutoStatus();
           autoExpiredList.appendChild(autoRow);
         });
       }

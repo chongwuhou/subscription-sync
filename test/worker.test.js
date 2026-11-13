@@ -379,6 +379,8 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(pageText, /自定义节点位置/);
   assert.match(pageText, /已过期的旧汇总地址/);
   assert.match(pageText, /用户分发订阅/);
+  assert.match(pageText, /自动到期分发地址（可调整日期）/);
+  assert.match(pageText, /autoDistributionExpiry/);
   assert.match(pageText, /备注名称（仅自己可见）/);
   assert.match(pageText, /到期日期/);
   assert.match(pageText, /分发订阅地址/);
