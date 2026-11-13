@@ -19,7 +19,7 @@
 
 生产部署的构建变量 `WRANGLER_SEND_METRICS=false` 已关闭 Wrangler 匿名遥测，`preview_urls = false` 已关闭预览链接。生产固定地址仍使用 `workers.dev`，方便后续生成稳定订阅链接。
 
-D1 是可选项。启用 `SUBSCRIPTION_AUDIT` 后，运行 `migrations/0001_audit.sql` 和 `migrations/0002_source_snapshots.sql`。除刷新审计外，`source_snapshots` 会保存每个源的历史有效节点 JSON，并按源内容哈希去重；源站暂时不可用时，Worker 会读取最近快照重新套用当前规则。它不保存原始订阅地址或 Token，但节点 JSON 可能包含 UUID、密码等敏感凭据，应限制 D1 访问权限。
+D1 是生产控制面的最终来源。启用 `SUBSCRIPTION_AUDIT` 后，运行 `migrations/0001_audit.sql`、`migrations/0002_source_snapshots.sql` 和 `migrations/0003_control_plane.sql`。`subscription_control` 保存后台订阅配置、刷新设置、汇总 Token 和过期地址；首次读取时会把旧 KV 配置迁移到 D1，之后以 D1 为准，KV 只作兼容缓存。除刷新审计外，`source_snapshots` 会保存每个源的历史有效节点 JSON，并按源内容哈希去重；源站暂时不可用时，Worker 会读取最近快照重新套用当前规则。控制表和节点 JSON 可能包含源地址、Token、UUID、密码等敏感凭据，应限制 D1 管理访问。
 
 ## 多订阅配置
 
@@ -66,7 +66,7 @@ Worker 为每个 `id` 使用独立的 KV key：`published-state-v1:<id>`，公�
 - `DEFAULT_TARGET`：无法识别客户端时的默认格式，默认 `clash`。
 - `REFRESH_INTERVAL_MINUTES`：后台尚未保存设置时的刷新间隔，5-1440 分钟，按 5 分钟递增，默认 `30`。
 
-部署后访问 `/admin`，输入 `ADMIN_TOKEN` 即可管理多个源和刷新间隔。后台保存的订阅配置写入受保护的 KV；管理员 API 不接受公开源地址参数，且不把源地址写入日志。
+部署后访问 `/admin`，输入 `ADMIN_TOKEN` 即可管理多个源和刷新间隔。后台保存的订阅配置写入受保护的 D1，并同步 KV 兼容缓存；管理员 API 不接受公开源地址参数，且不把源地址写入日志。后台状态面板显示最近刷新结果、有效节点数和历史源使用情况。
 
 后台“改名规则 JSON”示例：
 

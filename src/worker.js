@@ -19,8 +19,13 @@ const ADMIN_EXPIRED_KEY = "subscription-expired-v1";
 const AGGREGATE_PUBLIC_TOKEN_KEY = "subscription-aggregate-config-v1";
 const AGGREGATE_STATE_ID = "__all__";
 const LAST_REFRESH_KEY = "subscription-refresh-meta-v1";
+const CONTROL_PROFILES_KEY = "profiles";
+const CONTROL_SETTINGS_KEY = "settings";
+const CONTROL_EXPIRED_KEY = "expired-subscription";
+const CONTROL_AGGREGATE_TOKEN_KEY = "aggregate-public-token";
 const DEFAULT_REFRESH_INTERVAL_MINUTES = 30;
 let sourceSnapshotSchemaPromise = null;
+let controlPlaneSchemaPromise = null;
 
 const ADMIN_HTML = `<!doctype html>
 <html lang="zh-CN">
@@ -61,6 +66,9 @@ const ADMIN_HTML = `<!doctype html>
     .history-version-meta strong { display: block; }
     .history-version-meta small { display: block; margin-top: .15rem; opacity: .75; overflow-wrap: anywhere; }
     .history-version-row button { flex: 0 0 auto; margin: 0; }
+    .status-panel { margin: .7rem 0; padding: .65rem .8rem; border: 1px solid #8885; border-radius: 6px; background: color-mix(in srgb, Canvas 94%, #16803c 6%); }
+    .status-panel strong { display: block; margin-bottom: .25rem; }
+    .status-panel small { display: block; opacity: .78; line-height: 1.45; }
     .rename-rules { margin: .8rem 0; padding: .7rem; border: 1px solid #8885; border-radius: 6px; }
     .rename-rules-title { font-weight: 600; margin-bottom: .5rem; }
     .rename-rule-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; gap: .45rem; align-items: end; margin: .45rem 0; }
@@ -74,10 +82,10 @@ const ADMIN_HTML = `<!doctype html>
 </head>
 <body>
   <h1>Subscription Sync 管理</h1>
-  <p class="muted">管理源头订阅地址、节点过滤、节点改名规则、最低有效节点数和客户端输出格式。配置只保存到受保护的 Cloudflare KV，不保存在浏览器。</p>
+  <p class="muted">管理源头订阅地址、节点过滤、节点改名规则、最低有效节点数和客户端输出格式。配置以受保护的 Cloudflare D1 为准，KV 只作兼容缓存，不保存在浏览器。</p>
   <p><button id="login">输入管理员令牌</button> <button id="reload" disabled>重新读取</button> <button id="save" disabled>保存订阅配置</button> <button id="refresh" disabled>立即刷新</button> <button id="add" disabled>新增订阅</button></p>
   <label>自动刷新间隔（分钟，5-1440，按 5 分钟粒度）<input id="interval" type="number" min="5" max="1440" step="5" value="30" disabled></label>
-  <p class="notice">保存后，订阅地址、改名规则、Clash 分流配置和刷新间隔会写入 Cloudflare KV；Clash 分流配置在下一次请求时生效，源订阅节点在下一次定时刷新或点击“立即刷新”后更新。源站临时不可用时使用 D1 最近一次有效快照并重新套用当前规则。只有管理员令牌可以读取源地址。</p>
+  <p class="notice">保存后，订阅配置、改名规则、Clash 分流配置和刷新间隔以 Cloudflare D1 为最终来源，并同步 KV 兼容缓存；源订阅节点在下一次定时刷新或点击“立即刷新”后更新。源站临时不可用时使用 D1 最近一次有效快照并重新套用当前规则。只有管理员令牌可以读取源地址。</p>
   <div id="status"></div>
   <div id="clash-settings"></div>
   <div id="aggregate"></div>
@@ -96,7 +104,9 @@ const ADMIN_HTML = `<!doctype html>
         rules: ["MATCH,PROXY"]
       },
       aggregateCustomNodes: [],
-      aggregateCustomNodePosition: "tail"
+      aggregateCustomNodePosition: "tail",
+      aggregateStatus: null,
+      controlPlane: ""
     };
     const status = document.getElementById("status");
     const aggregateRoot = document.getElementById("aggregate");
@@ -263,6 +273,26 @@ const ADMIN_HTML = `<!doctype html>
       pane.appendChild(list);
       parent.appendChild(pane);
     }
+    function formatDate(value) {
+      if (!value) return "暂无";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+    }
+    function renderStatusPanel(parent, title, status, extra = "") {
+      const panel = document.createElement("section");
+      panel.className = "status-panel";
+      const heading = document.createElement("strong");
+      heading.textContent = title;
+      panel.appendChild(heading);
+      const detail = document.createElement("small");
+      const value = status || {};
+      detail.textContent = "最近处理：" + formatDate(value.lastRefreshAt) + " · " + (value.lastAction || "暂无") + (value.lastReason ? "（" + value.lastReason + "）" : "") + " · 有效节点：" + Number(value.lastValidCount || 0) + (extra ? " · " + extra : "");
+      panel.appendChild(detail);
+      const source = document.createElement("small");
+      source.textContent = "最近有效源：" + formatDate(value.sourceSnapshotAt) + (value.publishedAt ? " · 最近发布：" + formatDate(value.publishedAt) : "");
+      panel.appendChild(source);
+      parent.appendChild(panel);
+    }
     function renderAggregate() {
       aggregateRoot.replaceChildren();
       const card = document.createElement("fieldset");
@@ -290,6 +320,7 @@ const ADMIN_HTML = `<!doctype html>
       note.className = "muted";
       note.textContent = "汇总地址会合并所有源头订阅的已发布有效节点；某个源头失效时保留它上一次的有效版本。修改 /sub/ 后面的路径后点击保存即可。";
       card.appendChild(note);
+      renderStatusPanel(card, "汇总运行状态", state.aggregateStatus, "控制面：" + (state.controlPlane === "d1" ? "D1 权威" : "兼容回退"));
       addField(
         card,
         "aggregateCustomNodes",
@@ -382,6 +413,7 @@ const ADMIN_HTML = `<!doctype html>
         summary.textContent = "订阅 " + (index + 1) + " · " + (profile.id || "未命名");
         profileCard.appendChild(summary);
         const card = document.createElement("fieldset");
+        renderStatusPanel(card, "刷新状态", profile.status, profile.paused ? "自动更新已暂停" : "自动更新中");
         addField(card, "id", "订阅名称 / ID（唯一）", profile.id, "text", "例如：主订阅 或 backup");
         addField(card, "sourceUrl", "完整源头订阅地址（把 ?token=... 一起粘贴，仅管理员可见）", profile.sourceUrl, "url", "https://供应商.example/subscribe?token=...");
         const uploadLabel = document.createElement("label");
@@ -599,8 +631,10 @@ const ADMIN_HTML = `<!doctype html>
         interval.value = state.refreshIntervalMinutes;
         interval.disabled = false;
         setEnabled(true);
+        state.aggregateStatus = data.aggregateStatus || null;
+        state.controlPlane = data.controlPlane || "";
         render();
-        setStatus("已读取 " + state.profiles.length + " 个订阅（" + (data.managed ? "Cloudflare KV 已保存配置" : "当前没有 KV 保存项，使用环境变量回退") + "）");
+        setStatus("已读取 " + state.profiles.length + " 个订阅（" + (data.controlPlane === "d1" ? "D1 是权威配置源，KV 为兼容缓存" : data.managed ? "兼容 KV 已保存配置" : "使用环境变量回退") + "）");
       } catch (error) { setStatus(error.message); }
     }
     document.getElementById("login").onclick = async () => {
@@ -631,7 +665,7 @@ const ADMIN_HTML = `<!doctype html>
         const settingsResult = await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value), clashConfig, aggregateCustomNodes, aggregateCustomNodePosition }) });
         const scope = focusIndex ? "第 " + focusIndex + " 个订阅" : subscriptions.length + " 个订阅";
         await load();
-        setStatus("已保存" + scope + "、Clash 分流配置、刷新间隔及汇总自定义节点到 Cloudflare KV（已识别 " + Number(settingsResult.aggregateCustomNodeCount || 0) + " 个自定义节点）。");
+        setStatus("已保存" + scope + "、分流配置、刷新间隔及汇总自定义节点到 D1（KV 同步为兼容缓存，已识别 " + Number(settingsResult.aggregateCustomNodeCount || 0) + " 个自定义节点）。");
       } catch (error) { setStatus(error.message); }
     }
     document.getElementById("save").onclick = () => saveAll();
@@ -720,12 +754,85 @@ async function loadState(env, profileId) {
   }
 }
 
-async function loadProfiles(env) {
+async function loadProfilesFromLegacy(env) {
   if (env.SUBSCRIPTION_STATE?.get) {
     const stored = await env.SUBSCRIPTION_STATE.get(ADMIN_CONFIG_KEY);
     if (stored !== null) return parseSubscriptionProfilesJson(stored);
   }
   return parseSubscriptionProfiles(env);
+}
+
+async function loadProfilesFromKv(env) {
+  if (!env.SUBSCRIPTION_STATE?.get) return null;
+  const stored = await env.SUBSCRIPTION_STATE.get(ADMIN_CONFIG_KEY);
+  return stored === null ? null : parseSubscriptionProfilesJson(stored);
+}
+
+async function ensureControlPlaneSchema(env) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare) return false;
+  if (!controlPlaneSchemaPromise) {
+    controlPlaneSchemaPromise = env.SUBSCRIPTION_AUDIT
+      .prepare("CREATE TABLE IF NOT EXISTS subscription_control (control_key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)")
+      .bind()
+      .run()
+      .then(() => true)
+      .catch(() => {
+        controlPlaneSchemaPromise = null;
+        return false;
+      });
+  }
+  return controlPlaneSchemaPromise;
+}
+
+async function readControlValue(env, key) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare || !await ensureControlPlaneSchema(env)) {
+    return { available: false, exists: false, value: null };
+  }
+  try {
+    const row = await env.SUBSCRIPTION_AUDIT
+      .prepare("SELECT value_json FROM subscription_control WHERE control_key = ? LIMIT 1")
+      .bind(key)
+      .first();
+    if (!row?.value_json) return { available: true, exists: false, value: null };
+    return { available: true, exists: true, value: JSON.parse(row.value_json) };
+  } catch {
+    return { available: false, exists: false, value: null };
+  }
+}
+
+async function writeControlValue(env, key, value, now = new Date()) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare) return false;
+  if (!await ensureControlPlaneSchema(env)) throw new Error("D1 control plane is unavailable");
+  await env.SUBSCRIPTION_AUDIT
+    .prepare("INSERT INTO subscription_control (control_key, value_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(control_key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at")
+    .bind(key, JSON.stringify(value), now.toISOString())
+    .run();
+  return true;
+}
+
+async function deleteControlValue(env, key) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare || !await ensureControlPlaneSchema(env)) return false;
+  await env.SUBSCRIPTION_AUDIT.prepare("DELETE FROM subscription_control WHERE control_key = ?").bind(key).run();
+  return true;
+}
+
+async function loadCanonicalValue(env, key, legacyLoader) {
+  const control = await readControlValue(env, key);
+  if (control.available) {
+    if (control.exists) return { value: control.value, managed: true, fromD1: true };
+    const legacy = await legacyLoader();
+    if (legacy !== null && legacy !== undefined) {
+      await writeControlValue(env, key, legacy);
+      return { value: legacy, managed: true, fromD1: true, migrated: true };
+    }
+    return { value: null, managed: false, fromD1: true };
+  }
+  return { value: await legacyLoader(), managed: false, fromD1: false };
+}
+
+async function loadProfiles(env) {
+  const result = await loadCanonicalValue(env, CONTROL_PROFILES_KEY, () => loadProfilesFromKv(env));
+  return Array.isArray(result.value) ? result.value : loadProfilesFromLegacy(env);
 }
 
 function normalizeRefreshInterval(value, fallback = DEFAULT_REFRESH_INTERVAL_MINUTES) {
@@ -786,7 +893,7 @@ function parseAggregateToken(raw) {
   }
 }
 
-async function loadAggregateToken(env) {
+async function loadAggregateTokenFromLegacy(env) {
   if (env.SUBSCRIPTION_STATE?.get) {
     const stored = await env.SUBSCRIPTION_STATE.get(AGGREGATE_PUBLIC_TOKEN_KEY);
     const token = parseAggregateToken(stored);
@@ -795,9 +902,21 @@ async function loadAggregateToken(env) {
   return String(env.AGGREGATE_PUBLIC_TOKEN ?? "").trim();
 }
 
+async function loadAggregateToken(env) {
+  const result = await loadCanonicalValue(env, CONTROL_AGGREGATE_TOKEN_KEY, async () => {
+    if (!env.SUBSCRIPTION_STATE?.get) return null;
+    const stored = await env.SUBSCRIPTION_STATE.get(AGGREGATE_PUBLIC_TOKEN_KEY);
+    if (stored === null) return null;
+    const legacy = parseAggregateToken(stored);
+    return legacy || null;
+  });
+  return typeof result.value === "string" ? result.value : String(result.value?.publicToken ?? "").trim() || String(env.AGGREGATE_PUBLIC_TOKEN ?? "").trim();
+}
+
 async function ensureAggregateToken(env, requested = "") {
   const candidate = String(requested ?? "").trim();
   if (candidate && /^[A-Za-z0-9_-]{1,128}$/.test(candidate)) {
+    await writeControlValue(env, CONTROL_AGGREGATE_TOKEN_KEY, candidate);
     if (env.SUBSCRIPTION_STATE?.put) {
       await env.SUBSCRIPTION_STATE.put(AGGREGATE_PUBLIC_TOKEN_KEY, JSON.stringify({ publicToken: candidate }));
     }
@@ -807,11 +926,12 @@ async function ensureAggregateToken(env, requested = "") {
   if (existing) return existing;
   if (!env.SUBSCRIPTION_STATE?.put) return "";
   const generated = createPublicToken();
+  await writeControlValue(env, CONTROL_AGGREGATE_TOKEN_KEY, generated);
   await env.SUBSCRIPTION_STATE.put(AGGREGATE_PUBLIC_TOKEN_KEY, JSON.stringify({ publicToken: generated }));
   return generated;
 }
 
-async function loadExpiredSubscription(env) {
+async function loadExpiredSubscriptionFromLegacy(env) {
   if (env.SUBSCRIPTION_STATE?.get) {
     const stored = await env.SUBSCRIPTION_STATE.get(ADMIN_EXPIRED_KEY);
     if (stored !== null) {
@@ -821,15 +941,26 @@ async function loadExpiredSubscription(env) {
   return normalizeExpiredSubscription(null);
 }
 
+async function loadExpiredSubscription(env) {
+  const result = await loadCanonicalValue(env, CONTROL_EXPIRED_KEY, async () => {
+    if (!env.SUBSCRIPTION_STATE?.get) return null;
+    const stored = await env.SUBSCRIPTION_STATE.get(ADMIN_EXPIRED_KEY);
+    if (stored === null) return null;
+    try { return normalizeExpiredSubscription(JSON.parse(stored)); } catch { return normalizeExpiredSubscription(null); }
+  });
+  return normalizeExpiredSubscription(result.value ?? await loadExpiredSubscriptionFromLegacy(env));
+}
+
 async function saveExpiredSubscription(env, value) {
   const normalized = normalizeExpiredSubscription(value);
+  await writeControlValue(env, CONTROL_EXPIRED_KEY, normalized);
   if (env.SUBSCRIPTION_STATE?.put) {
     await env.SUBSCRIPTION_STATE.put(ADMIN_EXPIRED_KEY, JSON.stringify(normalized));
   }
   return normalized;
 }
 
-async function loadSettings(env) {
+async function loadSettingsFromLegacy(env) {
   if (env.SUBSCRIPTION_STATE?.get) {
     const stored = await env.SUBSCRIPTION_STATE.get(ADMIN_SETTINGS_KEY);
     if (stored !== null) {
@@ -854,6 +985,22 @@ async function loadSettings(env) {
   };
 }
 
+async function loadSettings(env) {
+  const result = await loadCanonicalValue(env, CONTROL_SETTINGS_KEY, async () => {
+    if (!env.SUBSCRIPTION_STATE?.get) return null;
+    const stored = await env.SUBSCRIPTION_STATE.get(ADMIN_SETTINGS_KEY);
+    if (stored === null) return null;
+    try { return JSON.parse(stored); } catch { return null; }
+  });
+  const value = result.value && typeof result.value === "object" ? result.value : await loadSettingsFromLegacy(env);
+  return {
+    refreshIntervalMinutes: normalizeRefreshInterval(value.refreshIntervalMinutes ?? env.REFRESH_INTERVAL_MINUTES),
+    clashConfig: normalizeAutomaticClashConfig(value.clashConfig ?? env.CLASH_CONFIG_JSON),
+    aggregateCustomNodes: normalizeAggregateCustomNodes(value.aggregateCustomNodes ?? env.AGGREGATE_CUSTOM_NODES),
+    aggregateCustomNodePosition: normalizeAggregateCustomNodePosition(value.aggregateCustomNodePosition ?? env.AGGREGATE_CUSTOM_NODE_POSITION)
+  };
+}
+
 async function scheduledRefreshDue(env, now) {
   const settings = await loadSettings(env);
   if (!env.SUBSCRIPTION_STATE?.get || !env.SUBSCRIPTION_STATE?.put) return { due: true, settings };
@@ -874,11 +1021,17 @@ async function scheduledRefreshDue(env, now) {
 }
 
 async function storedProfiles(env) {
-  if (env.SUBSCRIPTION_STATE?.get) {
-    const stored = await env.SUBSCRIPTION_STATE.get(ADMIN_CONFIG_KEY);
-    if (stored !== null) return { managed: true, profiles: parseSubscriptionProfilesJson(stored) };
+  const control = await readControlValue(env, CONTROL_PROFILES_KEY);
+  if (control.available && control.exists) {
+    return { managed: true, profiles: Array.isArray(control.value) ? control.value : [] };
   }
-  return { managed: false, profiles: parseSubscriptionProfiles(env) };
+  const storedProfiles = await loadProfilesFromKv(env);
+  if (control.available && storedProfiles !== null) {
+    const profiles = storedProfiles;
+    await writeControlValue(env, CONTROL_PROFILES_KEY, profiles);
+    return { managed: true, profiles };
+  }
+  return { managed: false, profiles: await loadProfilesFromLegacy(env) };
 }
 
 function isAdminAuthorized(request, env) {
@@ -923,7 +1076,8 @@ async function handleAdminApi(request, env, url) {
     const subscriptions = await Promise.all(current.profiles.map(async (profile) => {
       const d1Meta = await loadLatestSourceSnapshotMeta(env, profile.id);
       const historyVersions = await listSourceSnapshotMeta(env, profile.id);
-      if (d1Meta) return { ...profile, ...d1Meta, historyVersions, sourceStorage: "d1" };
+      const status = await loadStatus(env, profile.id, d1Meta);
+      if (d1Meta) return { ...profile, ...d1Meta, historyVersions, sourceStorage: "d1", status };
       const state = await loadState(env, profile.id);
       if (state?.sourceSnapshotAt || state?.sourceNodes?.length || state?.nodes?.length) {
         return {
@@ -931,11 +1085,13 @@ async function handleAdminApi(request, env, url) {
           capturedAt: state.sourceSnapshotAt ?? state.updatedAt ?? "",
           validCount: Number(state.validCount ?? state.nodes?.length ?? 0),
           historyVersions,
-          sourceStorage: "kv"
+          sourceStorage: "kv",
+          status
         };
       }
-      return { ...profile, historyVersions };
+      return { ...profile, historyVersions, status };
     }));
+    const aggregateStatus = await loadStatus(env, AGGREGATE_STATE_ID);
     return json({
       managed: current.managed,
       subscriptions,
@@ -944,7 +1100,9 @@ async function handleAdminApi(request, env, url) {
       refreshIntervalMinutes: settings.refreshIntervalMinutes,
       clashConfig: settings.clashConfig,
       aggregateCustomNodes: settings.aggregateCustomNodes,
-      aggregateCustomNodePosition: settings.aggregateCustomNodePosition
+      aggregateCustomNodePosition: settings.aggregateCustomNodePosition,
+      aggregateStatus,
+      controlPlane: await ensureControlPlaneSchema(env) ? "d1" : "kv-fallback"
     });
   }
   if (url.pathname === "/api/admin/subscriptions" && request.method === "PUT") {
@@ -975,6 +1133,7 @@ async function handleAdminApi(request, env, url) {
         return json({ error: "current aggregate address cannot also be marked expired" }, 400);
       }
       const aggregatePublicToken = await ensureAggregateToken(env, requestedAggregateToken);
+      await writeControlValue(env, CONTROL_PROFILES_KEY, checked.profiles);
       await env.SUBSCRIPTION_STATE.put(ADMIN_CONFIG_KEY, JSON.stringify(checked.profiles));
       const expiredSubscription = await saveExpiredSubscription(env, expiredSubscriptionInput);
       await reprocessConfiguredProfiles(env, checked.profiles);
@@ -1013,6 +1172,7 @@ async function handleAdminApi(request, env, url) {
       const current = await storedProfiles(env);
       const checked = validateSubscriptionProfiles(current.profiles.map((item) => item.id === id ? { ...item, paused: pauseUpdates } : item));
       if (checked.error) return json({ error: checked.error }, 400);
+      await writeControlValue(env, CONTROL_PROFILES_KEY, checked.profiles);
       await env.SUBSCRIPTION_STATE.put(ADMIN_CONFIG_KEY, JSON.stringify(checked.profiles));
       const now = new Date();
       const decision = decidePublication(candidate, previous);
@@ -1104,12 +1264,14 @@ async function handleAdminApi(request, env, url) {
       const aggregateCustomNodePosition = Object.prototype.hasOwnProperty.call(body ?? {}, "aggregateCustomNodePosition")
         ? normalizeAggregateCustomNodePosition(body.aggregateCustomNodePosition)
         : current.aggregateCustomNodePosition;
-      await env.SUBSCRIPTION_STATE.put(ADMIN_SETTINGS_KEY, JSON.stringify({
+      const settingsValue = {
         refreshIntervalMinutes: value,
         clashConfig,
         aggregateCustomNodes,
         aggregateCustomNodePosition
-      }));
+      };
+      await writeControlValue(env, CONTROL_SETTINGS_KEY, settingsValue);
+      await env.SUBSCRIPTION_STATE.put(ADMIN_SETTINGS_KEY, JSON.stringify(settingsValue));
       await reprocessConfiguredProfiles(env, await loadProfiles(env), new Date(), {
         refreshIntervalMinutes: value,
         clashConfig,
@@ -1172,6 +1334,10 @@ async function handleAdminApi(request, env, url) {
   }
   if (url.pathname === "/api/admin/subscriptions/reset" && request.method === "POST") {
     if (!env.SUBSCRIPTION_STATE.delete) return json({ error: "state-store-does-not-support-delete" }, 503);
+    await deleteControlValue(env, CONTROL_PROFILES_KEY);
+    await deleteControlValue(env, CONTROL_SETTINGS_KEY);
+    await deleteControlValue(env, CONTROL_EXPIRED_KEY);
+    await deleteControlValue(env, CONTROL_AGGREGATE_TOKEN_KEY);
     await env.SUBSCRIPTION_STATE.delete(ADMIN_CONFIG_KEY);
     await env.SUBSCRIPTION_STATE.delete(ADMIN_EXPIRED_KEY);
     await env.SUBSCRIPTION_STATE.delete(AGGREGATE_PUBLIC_TOKEN_KEY);
@@ -1269,6 +1435,42 @@ async function listSourceSnapshotMeta(env, profileId) {
   } catch {
     return [];
   }
+}
+
+async function loadLatestAuditMeta(env, subscriptionId) {
+  if (!env.SUBSCRIPTION_AUDIT?.prepare) return null;
+  try {
+    const result = await env.SUBSCRIPTION_AUDIT
+      .prepare("SELECT created_at, action, reason, valid_count, content_hash FROM refresh_audit WHERE subscription_id = ? ORDER BY created_at DESC, id DESC LIMIT 1")
+      .bind(subscriptionId)
+      .first();
+    if (!result) return null;
+    return {
+      lastRefreshAt: String(result.created_at ?? ""),
+      lastAction: String(result.action ?? ""),
+      lastReason: String(result.reason ?? ""),
+      lastValidCount: Number(result.valid_count ?? 0),
+      contentHash: result.content_hash ? String(result.content_hash) : ""
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function loadStatus(env, subscriptionId, sourceMeta = null) {
+  const audit = await loadLatestAuditMeta(env, subscriptionId);
+  const state = await loadState(env, subscriptionId);
+  const stateSourceAt = state?.sourceSnapshotAt ?? state?.updatedAt ?? "";
+  return {
+    lastRefreshAt: audit?.lastRefreshAt ?? state?.lastRefreshAt ?? state?.updatedAt ?? "",
+    lastAction: audit?.lastAction ?? state?.lastAction ?? (state ? "published" : ""),
+    lastReason: audit?.lastReason ?? state?.lastReason ?? "",
+    lastValidCount: audit?.lastValidCount ?? Number(state?.validCount ?? state?.nodes?.length ?? 0),
+    publishedAt: state?.updatedAt ?? "",
+    sourceSnapshotAt: sourceMeta?.capturedAt ?? stateSourceAt,
+    sourceStorage: sourceMeta ? "d1" : state?.sourceSnapshotAt ? "kv" : "",
+    hasPublishedOutput: Boolean(state?.output || state?.nodes?.length)
+  };
 }
 
 async function loadSourceSnapshotByHash(env, profileId, sourceContentHash) {
@@ -1451,10 +1653,14 @@ export async function refreshAll(env, now = new Date()) {
 }
 
 export async function refreshAggregate(env, now = new Date(), profiles = null, settings = null) {
+  const finish = async (result) => {
+    await writeAudit(env, AGGREGATE_STATE_ID, result, now);
+    return result;
+  };
   const sourceProfiles = profiles ?? await loadProfiles(env);
-  if (sourceProfiles.length === 0) return { subscriptionId: "all", action: "keep", reason: "no-subscriptions-configured" };
+  if (sourceProfiles.length === 0) return finish({ subscriptionId: "all", action: "keep", reason: "no-subscriptions-configured" });
   if (!env.SUBSCRIPTION_STATE?.get || !env.SUBSCRIPTION_STATE?.put) {
-    return { subscriptionId: "all", action: "keep", reason: "state-store-not-configured" };
+    return finish({ subscriptionId: "all", action: "keep", reason: "state-store-not-configured" });
   }
   const currentSettings = settings ?? await loadSettings(env);
   const nodeGroups = [];
@@ -1471,11 +1677,11 @@ export async function refreshAggregate(env, now = new Date(), profiles = null, s
       customNodePosition: currentSettings.aggregateCustomNodePosition
     });
   } catch (error) {
-    return { subscriptionId: "all", action: "keep", reason: "aggregate-error", error: error instanceof Error ? error.message : "unknown" };
+    return finish({ subscriptionId: "all", action: "keep", reason: "aggregate-error", error: error instanceof Error ? error.message : "unknown" });
   }
   const previous = await loadState(env, AGGREGATE_STATE_ID);
   const decision = decidePublication(candidate, previous);
-  if (decision.action === "keep") return { subscriptionId: "all", ...decision };
+  if (decision.action === "keep") return finish({ subscriptionId: "all", ...decision });
   await saveState(env, AGGREGATE_STATE_ID, {
     version: 1,
     subscriptionId: "all",
@@ -1485,7 +1691,7 @@ export async function refreshAggregate(env, now = new Date(), profiles = null, s
     nodes: decision.nodes,
     output: decision.output
   });
-  return { subscriptionId: "all", ...decision };
+  return finish({ subscriptionId: "all", ...decision });
 }
 
 export async function refreshEverything(env, now = new Date()) {

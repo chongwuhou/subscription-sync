@@ -9,7 +9,7 @@
 1. 一个 Worker 可以管理多个独立订阅源，每个源拥有独立的规则、状态和固定链接。
 2. 原始订阅地址只从私有配置读取，不写入源码。
 3. 定时抓取原始订阅，多个源按顺序处理，避免同时冲击上游。
-4. 支持常见 Clash YAML、JSON、Base64 分享链接格式，并覆盖 VMess、VLESS、Trojan、SS、SSR、Hysteria2、TUIC、AnyTLS、HTTP/SOCKS5 等常见节点类型；Clash/Mihomo 节点字段会原样保留。
+4. 支持常见 Clash YAML、JSON、Base64 分享链接格式，并覆盖 VMess、VLESS、Trojan、SS、SSR、Hysteria2、TUIC、AnyTLS、WireGuard、HTTP/SOCKS5 等常见节点类型；Clash/Mihomo 字段、sing-box 的传输层、Reality、TLS 指纹等关键字段会保留或映射。
 5. 按每个订阅源配置的正则规则改名。
 6. 自动去重、排序并生成 Clash/Mihomo YAML。
 7. 新内容有至少一个有效节点且哈希发生变化时才更新对应订阅。
@@ -23,6 +23,7 @@
 15. 管理员可以为单个订阅手动上传 Clash YAML；上传内容验证通过后会作为该订阅的历史源保存到 D1（D1 暂不可用时使用 KV 兜底），并立即参与单订阅和汇总订阅。
 16. 每个订阅后台会列出内容确实不同的历史版本，管理员可以选择某个版本重新套用当前规则并立即发布；也可以在使用版本时勾选暂停自动更新，固定该版本，之后定时刷新和手动刷新都会跳过该订阅。
 17. “全部订阅汇总”支持额外维护自定义节点链接，每行一个，可选择插入汇总节点的顶部或尾部；这些节点只加入汇总地址，不会改变任何单独订阅。
+18. 后台显示每个订阅和汇总的最近刷新、处理结果、有效节点数、最近有效源和最近发布时间；控制配置以 D1 为权威来源，KV 仅作为兼容缓存。
 
 ## 开源与后门审查
 
@@ -36,7 +37,7 @@
 
 ## 项目状态
 
-Worker 已通过 GitHub 自动部署到 `https://subscription-sync.chongwuhou.workers.dev`，并绑定 `subscription-sync-state` KV、`subscription-sync-audit` D1 和每 5 分钟基础 Cron；实际刷新间隔可在管理员后台设置，默认每 30 分钟。D1 的 `source_snapshots` 表保存每个源的历史有效节点快照，按源内容哈希去重，不会因短暂源站失联而丢失可用数据。后台的“历史内容版本”列表展示这些去重后的版本，选择版本时使用当前过滤、改名和输出配置重新生成订阅，不会删除原历史记录。
+Worker 已通过 GitHub 自动部署到 `https://subscription-sync.chongwuhou.workers.dev`，并绑定 `subscription-sync-state` KV、`subscription-sync-audit` D1 和每 5 分钟基础 Cron；实际刷新间隔可在管理员后台设置，默认每 30 分钟。D1 的 `subscription_control` 保存管理员控制配置，`source_snapshots` 保存每个源的历史有效节点快照，均按内容版本去重；KV 只保存发布状态和兼容缓存。源站暂时失联时不会丢失最近有效数据，后台状态面板会显示当前使用的是实时源还是历史快照。
 
 ## 本地检查
 
@@ -61,7 +62,8 @@ npm run check
 - `MIN_VALID_NODES`：最低有效节点数，默认 1。
 - `DEFAULT_TARGET`：无法从 User-Agent 判断时的默认输出格式，默认 `clash`。
 - `CLASH_CONFIG_JSON`：可选的 Clash/Mihomo 分流配置 JSON；后台保存的配置优先于该环境变量。
-- `SUBSCRIPTION_STATE`：保存最后一个成功版本的状态存储绑定。
+- `SUBSCRIPTION_STATE`：保存最后一个成功版本、公开输出和兼容缓存的 KV 绑定；管理员控制配置的最终来源是 `SUBSCRIPTION_AUDIT` 对应的 D1。
+- `SUBSCRIPTION_AUDIT`：保存刷新审计、历史源快照和 `subscription_control` 控制面表；生产环境应限制该 D1 的管理访问。
 - `SUBSCRIPTIONS_JSON`：多订阅配置。配置后优先于单订阅变量，例如：
 - `ADMIN_TOKEN`：管理员后台令牌，必须作为 Cloudflare Secret 设置；未设置时后台 API 保持关闭。
 
@@ -116,7 +118,7 @@ Clash 分流配置示例（后台的折叠项中填写）：
 }
 ```
 
-其中 `{{NODES}}` 是项目提供的占位符，会被替换成当前所有有效节点。默认的 `url-test` 会定期测试节点延迟，节点失联时自动跳过并选择其他可用节点；不需要在后台手动设置。Rule Provider 地址不会由项目偷偷注入，建议只填写自己信任的公开规则源。sing-box 输出也默认生成 `urltest` 组。
+其中 `{{NODES}}` 是项目提供的占位符，会被替换成当前所有有效节点。默认的 `url-test` 每 5 分钟测试节点延迟，节点失联时自动跳过并选择其他可用节点；这测的是可达性和延迟，不是带宽测速，不需要在后台手动设置。Rule Provider 地址不会由项目偷偷注入，建议只填写自己信任的公开规则源。sing-box 输出也默认生成对应的 `urltest` 组，默认测试地址为 `https://www.gstatic.com/generate_204`。
 
 改名规则可以直接复制下面的案例到后台的“改名规则 JSON”框：
 
@@ -128,7 +130,7 @@ Clash 分流配置示例（后台的折叠项中填写）：
 
 上例会把 `US | New York` 改成 `US-New York`。也可以按顺序组合规则，例如：
 `[{"pattern":"香港","replacement":"HK"},{"pattern":"新加坡","replacement":"SG"}]`。
-保存后配置写入 Cloudflare KV，重新打开后台仍会保留；6 小时和 24 小时分别填写 `360` 和 `1440` 分钟。
+保存后配置写入 Cloudflare D1，并同步到 Cloudflare KV 兼容缓存，重新打开后台仍会保留；6 小时和 24 小时分别填写 `360` 和 `1440` 分钟。
 
 节点过滤在改名规则之前执行，后台按“组合条件”填写：必须包含 `VIP2`，以下任意一个填写 `美国1|美国2|美国3`，排除任意一个填写 `到期|续费`，最终就是 `VIP2 且（美国1/美国2/美国3 任意一个）`，并排除到期或续费。关键词是不区分大小写的名称包含匹配，三项都留空就是不过滤。过滤后有效节点不足最低数量时不会覆盖旧订阅，但未过滤的有效源节点仍会保存到 D1 历史快照，方便之后调整过滤条件重新处理。
 

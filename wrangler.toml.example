@@ -18,15 +18,16 @@ id = "replace-with-an-approved-kv-namespace-id"
 # last good version from KV.
 crons = ["*/5 * * * *"]
 
-# Optional: enable this binding for refresh audit history and source snapshots.
-# Apply migrations/0001_audit.sql and migrations/0002_source_snapshots.sql.
+# Enable this binding for the D1 control plane, refresh audit history and source snapshots.
+# Apply migrations/0001_audit.sql, migrations/0002_source_snapshots.sql and
+# migrations/0003_control_plane.sql.
 # Snapshots store normalized valid node JSON for offline rule reprocessing;
 # they do not store source URLs or Tokens, but may contain node credentials.
-# [[d1_databases]]
-# binding = "SUBSCRIPTION_AUDIT"
-# database_name = "subscription-sync-audit"
-# database_id = "replace-with-an-approved-d1-database-id"
-# migrations_dir = "migrations"
+[[d1_databases]]
+binding = "SUBSCRIPTION_AUDIT"
+database_name = "subscription-sync-audit"
+database_id = "replace-with-an-approved-d1-database-id"
+migrations_dir = "migrations"
 
 [vars]
 # Keep the actual source URL and public token out of this file.

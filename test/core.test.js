@@ -220,6 +220,57 @@ test("supports AnyTLS share links and output formats", () => {
   assert.equal(outbound.tls.insecure, true);
 });
 
+test("preserves sing-box transport and Reality fields when converting to Clash and sing-box", async () => {
+  const source = JSON.stringify({
+    outbounds: [{
+      type: "vless",
+      tag: "Reality WS",
+      server: "edge.example.com",
+      server_port: 443,
+      uuid: "11111111-1111-1111-1111-111111111111",
+      flow: "xtls-rprx-vision",
+      tls: {
+        enabled: true,
+        server_name: "www.example.com",
+        reality: { enabled: true, public_key: "public-key", short_id: "short-id" },
+        utls: { enabled: true, fingerprint: "chrome" }
+      },
+      transport: { type: "ws", path: "/subscribe", headers: { Host: "www.example.com" } }
+    }]
+  });
+  const candidate = await buildCandidate(source);
+  assert.equal(candidate.validCount, 1);
+  assert.equal(candidate.nodes[0]["ws-opts"].path, "/subscribe");
+  assert.equal(candidate.nodes[0]["reality-opts"]["public-key"], "public-key");
+  const singBox = JSON.parse(renderSubscription(candidate.nodes, "sing-box").body);
+  const outbound = singBox.outbounds.find((item) => item.type === "vless");
+  assert.equal(outbound.flow, "xtls-rprx-vision");
+  assert.equal(outbound.transport.path, "/subscribe");
+  assert.equal(outbound.tls.reality.public_key, "public-key");
+  assert.equal(outbound.tls.utls.fingerprint, "chrome");
+});
+
+test("accepts WireGuard in Clash input and keeps it in both structured outputs", async () => {
+  const candidate = await buildCandidate(`
+proxies:
+  - name: WG Test
+    type: wireguard
+    server: wg.example.com
+    port: 51820
+    ip: 10.0.0.2/32
+    private-key: private-key
+    public-key: peer-public-key
+    allowed-ips: [0.0.0.0/0, ::/0]
+`);
+  assert.equal(candidate.validCount, 1);
+  assert.match(candidate.output, /type: wireguard/);
+  const singBox = JSON.parse(renderSubscription(candidate.nodes, "sing-box").body);
+  const outbound = singBox.outbounds.find((item) => item.type === "wireguard");
+  assert.equal(outbound.server_port, 51820);
+  assert.equal(outbound.peer_public_key, "peer-public-key");
+  assert.deepEqual(outbound.local_address, ["10.0.0.2/32"]);
+});
+
 test("supports an SSR share link", () => {
   const payload = `ssr.example.com:443:origin:aes-256-gcm:plain:${btoa("secret")}/?remarks=${btoa("SSR Test")}`;
   const node = parseShareLink(`ssr://${btoa(payload)}`);

@@ -69,12 +69,18 @@ function queryString(entries) {
 
 function commonParameters(node) {
   const ws = node["ws-opts"];
+  const reality = node["reality-opts"] || {};
   return {
     security: node.tls ? "tls" : "none",
     sni: node.sni,
     type: node.network,
     path: node.network === "ws" ? ws?.path || "/" : undefined,
-    host: node.network === "ws" ? ws?.headers?.Host : undefined
+    host: node.network === "ws" ? ws?.headers?.Host : undefined,
+    flow: node.flow,
+    fp: node["client-fingerprint"],
+    pbk: reality["public-key"] ?? reality.public_key,
+    sid: reality["short-id"] ?? reality.short_id,
+    allowInsecure: node["skip-cert-verify"] ? "1" : undefined
   };
 }
 
@@ -152,17 +158,39 @@ function compact(value) {
 
 function tlsForSingBox(node) {
   if (!node.tls && !node.sni) return undefined;
-  return { enabled: Boolean(node.tls), server_name: node.sni };
+  const reality = node["reality-opts"];
+  return compact({
+    enabled: Boolean(node.tls),
+    server_name: node.sni,
+    insecure: node["skip-cert-verify"],
+    alpn: node.alpn,
+    utls: node["client-fingerprint"] ? { enabled: true, fingerprint: node["client-fingerprint"] } : undefined,
+    reality: reality ? {
+      enabled: true,
+      public_key: reality["public-key"] ?? reality.public_key,
+      short_id: reality["short-id"] ?? reality.short_id
+    } : undefined
+  });
 }
 
 function transportForSingBox(node) {
-  if (node.network !== "ws") return undefined;
-  const ws = node["ws-opts"];
-  return {
-    type: "ws",
-    path: ws?.path || "/",
-    headers: ws?.headers
-  };
+  if (node.network === "ws") {
+    const ws = node["ws-opts"];
+    return { type: "ws", path: ws?.path || "/", headers: ws?.headers };
+  }
+  if (node.network === "h2" || node.network === "http") {
+    const h2 = node["h2-opts"] || {};
+    return { type: "http", path: h2.path || "/", host: h2.host };
+  }
+  if (node.network === "grpc") {
+    return { type: "grpc", service_name: node["grpc-opts"]?.["grpc-service-name"] };
+  }
+  if (node.network === "httpupgrade") {
+    const upgrade = node["http-upgrade-opts"] || {};
+    return { type: "httpupgrade", path: upgrade.path || "/", headers: upgrade.headers };
+  }
+  if (node.network === "quic") return { type: "quic" };
+  return undefined;
 }
 
 function toSingBoxOutbound(node, tag) {
@@ -179,13 +207,13 @@ function toSingBoxOutbound(node, tag) {
     });
   }
   if (node.type === "vless") {
-    return compact({ type: "vless", ...common, uuid: node.uuid, tls: tlsForSingBox(node), transport: transportForSingBox(node) });
+    return compact({ type: "vless", ...common, uuid: node.uuid, flow: node.flow, packet_encoding: node["packet-encoding"], tls: tlsForSingBox(node), transport: transportForSingBox(node) });
   }
-  if (node.type === "trojan") return compact({ type: "trojan", ...common, password: node.password, tls: tlsForSingBox(node) });
+  if (node.type === "trojan") return compact({ type: "trojan", ...common, password: node.password, tls: tlsForSingBox(node), transport: transportForSingBox(node) });
   if (node.type === "ss") return compact({ type: "shadowsocks", ...common, method: node.cipher, password: node.password });
-  if (node.type === "hysteria") return compact({ type: "hysteria", ...common, password: node.password, tls: tlsForSingBox(node) });
-  if (node.type === "hysteria2") return compact({ type: "hysteria2", ...common, password: node.password, tls: tlsForSingBox(node) });
-  if (node.type === "tuic") return compact({ type: "tuic", ...common, uuid: node.uuid, password: node.password, tls: tlsForSingBox(node) });
+  if (node.type === "hysteria") return compact({ type: "hysteria", ...common, password: node.password, up_mbps: node.up, down_mbps: node.down, obfs: node.obfs ? { type: "salamander", password: node.obfs } : undefined, tls: tlsForSingBox(node) });
+  if (node.type === "hysteria2") return compact({ type: "hysteria2", ...common, password: node.password, obfs: node.obfs ? { type: "salamander", password: node.obfs } : undefined, tls: tlsForSingBox(node) });
+  if (node.type === "tuic") return compact({ type: "tuic", ...common, uuid: node.uuid, password: node.password, congestion_control: node.congestion_controller, udp_relay_mode: node.udp_relay_mode, tls: tlsForSingBox(node) });
   if (node.type === "anytls") {
     return compact({
       type: "anytls",
@@ -208,6 +236,18 @@ function toSingBoxOutbound(node, tag) {
   }
   if (node.type === "http") return compact({ type: "http", ...common, username: node.username, password: node.password });
   if (node.type === "socks5") return compact({ type: "socks", ...common, username: node.username, password: node.password });
+  if (node.type === "wireguard") {
+    return compact({
+      type: "wireguard",
+      ...common,
+      local_address: [node.ip, node.ipv6].filter(Boolean),
+      private_key: node["private-key"],
+      peer_public_key: node["public-key"],
+      pre_shared_key: node["pre-shared-key"],
+      reserved: node.reserved,
+      mtu: node.mtu
+    });
+  }
   return null;
 }
 

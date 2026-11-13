@@ -24,12 +24,14 @@ class MemoryD1 {
   constructor() {
     this.rows = [];
     this.snapshots = [];
+    this.controls = new Map();
   }
 
   prepare(sql) {
     return {
       bind: (...values) => {
         const isSnapshot = sql.includes("source_snapshots");
+        const isControl = sql.includes("subscription_control");
         return {
           run: async () => {
             if (/^CREATE TABLE/i.test(sql)) {
@@ -37,11 +39,24 @@ class MemoryD1 {
             }
             if (isSnapshot) {
               if (!this.snapshots.some((row) => row[0] === values[0] && row[2] === values[2])) this.snapshots.push(values);
+            } else if (isControl && sql.startsWith("INSERT")) {
+              this.controls.set(values[0], { control_key: values[0], value_json: values[1], updated_at: values[2] });
+            } else if (isControl && sql.startsWith("DELETE")) {
+              this.controls.delete(values[0]);
             } else {
               this.rows.push(values);
             }
           },
           first: async () => {
+            if (isControl) return this.controls.get(values[0]) ?? null;
+            if (sql.includes("refresh_audit")) {
+              const row = this.rows
+                .filter((item) => item[0] === values[0])
+                .sort((left, right) => String(right[1]).localeCompare(String(left[1])))[0];
+              return row
+                ? { created_at: row[1], action: row[2], reason: row[3], valid_count: row[4], content_hash: row[5] }
+                : null;
+            }
             const row = this.snapshots
               .filter((item) => item[0] === values[0] && (!sql.includes("source_content_hash = ?") || item[2] === values[1]))
               .sort((left, right) => String(right[1]).localeCompare(String(left[1])))[0];
@@ -238,6 +253,7 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(pageText, /默认只替换名称/);
   assert.match(pageText, /Clash \/ Mihomo 分流配置/);
   assert.match(pageText, /默认自动测速/);
+  assert.match(pageText, /运行状态|D1/);
   assert.match(pageText, /Rule Providers|rule-providers/);
   assert.match(pageText, /上传并保存历史源/);
   assert.match(pageText, /节点名称组合筛选/);
@@ -313,10 +329,23 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.equal(body.clashConfig["rule-providers"].ads.type, "http");
   assert.deepEqual(body.aggregateCustomNodes, ["vless://11111111-1111-1111-1111-111111111111@custom.example.com:443?security=tls#Custom"]);
   assert.equal(body.aggregateCustomNodePosition, "top");
+  assert.equal(body.controlPlane, "d1");
+  assert.equal(body.subscriptions[0].status.lastAction, "");
   assert.deepEqual(body.expiredSubscription, {
     tokens: ["old-aggregate-token-123456"],
     nodeNames: ["已到期", "请联系顾问", "请改用新地址"]
   });
+  assert.ok(audit.controls.has("profiles"));
+  assert.ok(audit.controls.has("settings"));
+  await state.put("subscription-config-v1", JSON.stringify([{
+    id: "kv-only-different",
+    name: "KV only",
+    sourceUrl: "https://kv.example.com/source",
+    publicToken: "kv-token"
+  }]));
+  const d1CanonicalRead = await worker.fetch(new Request("https://worker.example.com/api/admin/subscriptions", { headers }), env);
+  const d1CanonicalBody = await d1CanonicalRead.json();
+  assert.equal(d1CanonicalBody.subscriptions[0].id, "工作一");
 
   const importResponse = await worker.fetch(new Request("https://worker.example.com/api/admin/import", {
     method: "POST",

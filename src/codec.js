@@ -10,6 +10,7 @@ const SUPPORTED_TYPES = new Set([
   "hysteria2",
   "tuic",
   "anytls",
+  "wireguard",
   "socks5",
   "http"
 ]);
@@ -232,7 +233,10 @@ function parseCommonUrl(link, type) {
     server: url.hostname,
     port: Number(url.port),
     tls: query.get("security") === "tls" || query.get("tls") === "1" || type === "trojan",
-    sni: query.get("sni") || query.get("peer") || undefined
+    sni: query.get("sni") || query.get("peer") || undefined,
+    flow: query.get("flow") || undefined,
+    "client-fingerprint": query.get("fp") || undefined,
+    "skip-cert-verify": query.get("allowInsecure") === "1" || query.get("insecure") === "1"
   };
   const username = decodeURIComponentSafe(url.username);
   const password = decodeURIComponentSafe(url.password);
@@ -248,6 +252,12 @@ function parseCommonUrl(link, type) {
     node["ws-opts"] = {
       path: query.get("path") || "/",
       headers: query.get("host") ? { Host: query.get("host") } : undefined
+    };
+  }
+  if (query.get("pbk") || query.get("sid")) {
+    node["reality-opts"] = {
+      "public-key": query.get("pbk") || undefined,
+      "short-id": query.get("sid") || undefined
     };
   }
   return node;
@@ -363,31 +373,95 @@ export function parseShareLink(link) {
   throw new Error(`Unsupported share-link scheme: ${scheme}`);
 }
 
+function normalizeSingBoxOutbound(item) {
+  const type = {
+    shadowsocks: "ss",
+    socks: "socks5"
+  }[item.type] || item.type;
+  const tls = item.tls && typeof item.tls === "object" ? item.tls : null;
+  const transport = item.transport && typeof item.transport === "object" ? item.transport : null;
+  const node = {
+    name: item.tag || `${type}-${item.server || "node"}`,
+    type,
+    server: item.server,
+    port: item.server_port,
+    uuid: item.uuid,
+    password: item.password,
+    username: item.username,
+    method: item.method,
+    cipher: item.method,
+    tls: Boolean(tls?.enabled),
+    sni: tls?.server_name,
+    flow: item.flow,
+    "packet-encoding": item.packet_encoding,
+    alterId: item.alter_id,
+    "skip-cert-verify": tls?.insecure,
+    alpn: tls?.alpn,
+    "client-fingerprint": tls?.utls?.fingerprint
+  };
+  if (transport?.type === "ws") {
+    node.network = "ws";
+    node["ws-opts"] = { path: transport.path || "/", headers: transport.headers };
+  } else if (transport?.type === "http") {
+    node.network = "h2";
+    node["h2-opts"] = { path: transport.path || "/", host: transport.host };
+  } else if (transport?.type === "grpc") {
+    node.network = "grpc";
+    node["grpc-opts"] = { "grpc-service-name": transport.service_name };
+  } else if (transport?.type === "httpupgrade") {
+    node.network = "httpupgrade";
+    node["http-upgrade-opts"] = { path: transport.path || "/", headers: transport.headers };
+  } else if (transport?.type === "quic") {
+    node.network = "quic";
+  }
+  const reality = tls?.reality && typeof tls.reality === "object" ? tls.reality : null;
+  if (reality) {
+    node["reality-opts"] = {
+      "public-key": reality.public_key,
+      "short-id": reality.short_id
+    };
+  }
+  if (type === "hysteria" || type === "hysteria2") {
+    node.up = item.up;
+    node.down = item.down;
+    node.obfs = item.obfs?.password ?? item.obfs?.type;
+  }
+  if (type === "tuic") {
+    node.congestion_controller = item.congestion_control;
+    node.udp_relay_mode = item.udp_relay_mode;
+  }
+  if (type === "anytls") {
+    node["idle-session-check-interval"] = item.idle_session_check_interval;
+    node["idle-session-timeout"] = item.idle_session_timeout;
+    node["min-idle-session"] = item.min_idle_session;
+    node["client-metadata"] = item.client_metadata;
+  }
+  if (type === "wireguard") {
+    const address = Array.isArray(item.local_address) ? item.local_address : [item.local_address];
+    node.ip = address.find((value) => value && !String(value).includes(":"));
+    node.ipv6 = address.find((value) => value && String(value).includes(":"));
+    node["private-key"] = item.private_key;
+    node["public-key"] = item.peer_public_key;
+    node["pre-shared-key"] = item.pre_shared_key;
+    node["allowed-ips"] = item.peer?.allowed_ips ?? item.allowed_ips;
+    node["persistent-keepalive"] = item.peer?.persistent_keepalive_interval ?? item.persistent_keepalive_interval;
+    node.reserved = item.reserved;
+    node.mtu = item.mtu;
+  }
+  return Object.fromEntries(Object.entries(node).filter(([, value]) => value !== undefined));
+}
+
 function fromJsonPayload(payload) {
-  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload)) {
+    return payload.map((item) => item && (item.server_port !== undefined || item.tag !== undefined)
+      ? normalizeSingBoxOutbound(item)
+      : item);
+  }
   if (Array.isArray(payload.proxies)) return payload.proxies;
   if (Array.isArray(payload.outbounds)) {
     return payload.outbounds
       .filter((item) => item && !["direct", "block", "dns", "selector", "urltest", "reject"].includes(item.type))
-      .map((item) => {
-        const type = {
-          shadowsocks: "ss",
-          socks: "socks5"
-        }[item.type] || item.type;
-        const node = {
-          name: item.tag || `${type}-${item.server || "node"}`,
-          type,
-          server: item.server,
-          port: item.server_port,
-          uuid: item.uuid,
-          password: item.password,
-          method: item.method,
-          cipher: item.method,
-          tls: Boolean(item.tls?.enabled),
-          sni: item.tls?.server_name
-        };
-        return node;
-      });
+      .map(normalizeSingBoxOutbound);
   }
   throw new Error("JSON subscription does not contain proxies or supported outbounds");
 }
@@ -477,6 +551,7 @@ export function isValidNode(node) {
   if (["vmess", "vless", "tuic"].includes(node.type) && !node.uuid) return false;
   if (["trojan", "hysteria2", "anytls"].includes(node.type) && !node.password) return false;
   if (node.type === "ss" && (!node.cipher || !node.password)) return false;
+  if (node.type === "wireguard" && (!node["private-key"] || !node["public-key"] || !node.ip)) return false;
   return true;
 }
 
