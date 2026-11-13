@@ -93,7 +93,7 @@ npm run check
 ]
 ```
 
-自动刷新和 Cloudflare 配置说明见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+自动刷新和 Cloudflare 配置说明见 [基础部署说明](docs/DEPLOYMENT.md)；如果要复制到其他 Cloudflare 账号，请按[跨账号完整部署手册](docs/CF_ACCOUNT_DEPLOYMENT.md)操作。该手册包含 Wrangler、KV、D1 migration、Secret、GitHub 自动部署、域名迁移和故障排查步骤。
 
 固定链接默认自动识别客户端，也可以显式指定：`?target=clash`、`?target=base64`、`?target=sing-box`、`?target=surge` 或 `?target=links`。`mihomo`、`stash` 等别名会映射到 Clash YAML；Shadowrocket、Surge 会得到原生 `[Proxy]` / `[Proxy Group]` 配置；V2Ray、Loon、Quantumult X 等别名会映射到 Base64 分享链接。Clash/Mihomo 和 sing-box 都默认生成自动测速/故障切换组。
 

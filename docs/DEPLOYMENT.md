@@ -1,5 +1,7 @@
 # Cloudflare deployment
 
+需要把项目复制到其他 Cloudflare 账号时，请优先阅读中文的[跨账号完整部署手册](CF_ACCOUNT_DEPLOYMENT.md)。本页保留基础资源说明和兼容配置参考。
+
 这份文档只描述部署方式，不会自动创建 Cloudflare 资源，也不要求把任何密钥提交到 GitHub。
 
 ## 资源
@@ -79,7 +81,7 @@ Worker 为每个 `id` 使用独立的 KV key：`published-state-v1:<id>`，公�
 
 这会把 `US | New York` 改成 `US-New York`。多个替换规则会按数组顺序执行，例如把地区统一成短名：
 `[{"pattern":"香港","replacement":"HK"},{"pattern":"新加坡","replacement":"SG"}]`。
-配置保存到 KV 后，重新打开后台仍会保留；6 小时和 24 小时分别填写 `360` 和 `1440` 分钟。
+配置保存到 D1，并同步 KV 兼容缓存，重新打开后台仍会保留；6 小时和 24 小时分别填写 `360` 和 `1440` 分钟。
 - `SOURCE_TIMEOUT_MS`：默认 `15000`。
 - `MAX_SOURCE_BYTES`：默认 `5242880`。
 - `SOURCE_RETRY_COUNT`：额外重试次数，默认 `2`，范围 `0-3`；只对网络错误、超时、408/425/429 和 5xx 重试。
@@ -92,7 +94,7 @@ Cron 触发器执行刷新：
 
 1. Worker 读取私有 `SOURCE_URL`，或读取多订阅的 `SUBSCRIPTIONS_JSON`；已有版本会带上 `If-None-Match` / `If-Modified-Since` 条件请求。
 2. 解析、重命名、去重、排序并验证节点。
-3. 没有有效节点时保留 KV 中的最后成功版本。
+3. 没有有效节点时保留 D1/KV 中的最后成功版本。
 4. 内容哈希不变时不写 KV。
 5. 内容有效且哈希变化时才替换 KV 中的发布版本。
 6. 公共链接只读取 KV，不会把上游地址暴露给客户端。
@@ -108,5 +110,5 @@ npm test
 npm run check
 ```
 
-部署后应先访问 `/healthz`，再确认固定订阅路径在首次成功刷新后返回 `text/yaml`。不要把真实返回内容、订阅 Token 或 Worker Secret 粘贴到公开 Issue、提交记录或日志中。
+部署后应先访问 `/healthz`，再确认固定订阅路径在首次成功刷新后按客户端返回对应格式。不要把真实返回内容、订阅 Token 或 Worker Secret 粘贴到公开 Issue、提交记录或日志中。
 
