@@ -606,6 +606,7 @@ function yamlScalar(value) {
 function renderYaml(value, indent = 0) {
   const padding = " ".repeat(indent);
   if (Array.isArray(value)) {
+    if (value.length === 0) return `${padding}[]`;
     return value
       .map((item) => {
         if (item !== null && typeof item === "object") {
@@ -620,6 +621,8 @@ function renderYaml(value, indent = 0) {
     return Object.entries(value)
       .filter(([, item]) => item !== undefined)
       .map(([key, item]) => {
+        if (Array.isArray(item) && item.length === 0) return `${padding}${key}: []`;
+        if (item !== null && typeof item === "object" && !Array.isArray(item) && Object.keys(item).length === 0) return `${padding}${key}: {}`;
         if (item !== null && typeof item === "object") {
           return `${padding}${key}:\n${renderYaml(item, indent + 2)}`;
         }

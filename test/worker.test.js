@@ -1,6 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker, { refresh, refreshAggregate, refreshAll } from "../src/worker.js";
+import { renderClashYaml } from "../src/codec.js";
+
+test("renders empty Clash list fields as valid YAML sequences", () => {
+  const output = renderClashYaml([{
+    name: "AnyTLS",
+    type: "anytls",
+    server: "node.example.com",
+    port: 443,
+    password: "secret",
+    alpn: [],
+    headers: {}
+  }]);
+  assert.match(output, /alpn: \[\]/);
+  assert.match(output, /headers: \{\}/);
+  assert.doesNotMatch(output, /alpn:\n\s*\n/);
+});
 
 class MemoryKV {
   constructor() {
@@ -515,6 +531,21 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(distributionText, /到期日期26-11-13/);
   assert.match(distributionText, /US \| One/);
   assert.ok(distributionText.indexOf("到期日期26-11-13") < distributionText.indexOf("US | One"));
+
+  const aggregateStateKey = "published-state-v1:__all__";
+  const staleAggregateState = JSON.parse(await state.get(aggregateStateKey));
+  staleAggregateState.nodes = [
+    { name: "订阅已过期", type: "vmess", server: "127.0.0.1", port: 1, uuid: "00000000-0000-0000-0000-000000000001" },
+    { name: "请联系顾问", type: "vmess", server: "127.0.0.1", port: 2, uuid: "00000000-0000-0000-0000-000000000002" },
+    { name: "续费后恢复", type: "vmess", server: "127.0.0.1", port: 3, uuid: "00000000-0000-0000-0000-000000000003" },
+    ...staleAggregateState.nodes
+  ];
+  await state.put(aggregateStateKey, JSON.stringify(staleAggregateState));
+  const isolatedDistributionResponse = await worker.fetch(new Request("https://worker.example.com/sub/" + distributionToken), env);
+  assert.equal(isolatedDistributionResponse.status, 200);
+  const isolatedDistributionText = await isolatedDistributionResponse.text();
+  assert.match(isolatedDistributionText, /到期日期26-11-13/);
+  assert.doesNotMatch(isolatedDistributionText, /订阅已过期|请联系顾问|续费后恢复/);
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => { throw new Error("source window closed"); };

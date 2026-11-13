@@ -40,9 +40,9 @@ export function normalizeExpiredSubscription(value) {
   };
 }
 
-export function buildExpiredDisplayNodes(value) {
-  return normalizeExpiredNodeNames(value).map((name, index) => ({
-    name,
+export function buildDisplayNode(name, index = 0) {
+  return {
+    name: String(name ?? "").trim() || "订阅已过期",
     type: "vmess",
     server: "127.0.0.1",
     port: index + 1,
@@ -50,7 +50,11 @@ export function buildExpiredDisplayNodes(value) {
     alterId: 0,
     cipher: "auto",
     network: "tcp"
-  }));
+  };
+}
+
+export function buildExpiredDisplayNodes(value) {
+  return normalizeExpiredNodeNames(value).map((name, index) => buildDisplayNode(name, index));
 }
 
 function normalizeProfile(item, index) {

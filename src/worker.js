@@ -1,5 +1,6 @@
 import { buildAggregateCandidate, buildCandidate, buildCandidateFromNodes, buildPreview, buildPreviewFromNodes, decidePublication } from "./core.js";
 import {
+  buildDisplayNode,
   buildExpiredDisplayNodes,
   normalizeExpiredSubscription,
   parseSubscriptionProfiles,
@@ -2306,8 +2307,20 @@ async function serveDistributionSubscription(env, distributionSubscription, requ
   }
   try {
     const settings = await loadSettings(env);
-    const displayNode = buildExpiredDisplayNodes([distributionSubscription.displayName]);
-    const rendered = renderSubscription([...displayNode, ...state.nodes], target, settings.clashConfig);
+    const expiredSubscription = await loadExpiredSubscription(env);
+    // Older aggregate snapshots may have been created while the expired-link
+    // placeholders were still part of the aggregate. Keep distribution output
+    // independent even before the next aggregate refresh rewrites that state.
+    const staleExpiredNames = new Set([
+      "订阅已过期",
+      "请联系顾问",
+      "续费后恢复",
+      ...expiredSubscription.nodeNames
+    ]);
+    const aggregateNodes = state.nodes.filter((node) => !staleExpiredNames.has(String(node?.name ?? "")));
+    if (aggregateNodes.length === 0) return new Response("No valid aggregate subscription has been published yet", { status: 503 });
+    const displayNode = [buildDisplayNode(distributionSubscription.displayName)];
+    const rendered = renderSubscription([...displayNode, ...aggregateNodes], target, settings.clashConfig);
     return responseFromRendered(rendered);
   } catch {
     return new Response("Distribution subscription output is unavailable", { status: 503 });
