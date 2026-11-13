@@ -359,6 +359,7 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(pageText, /正则模式/);
   assert.doesNotMatch(pageText, /改名规则 JSON/);
   assert.match(pageText, /修改后的通用订阅地址/);
+  assert.match(pageText, /汇总后的通用订阅地址/);
   assert.match(pageText, /复制地址/);
   assert.match(pageText, /默认只替换名称/);
   assert.match(pageText, /Clash \/ Mihomo 分流配置/);

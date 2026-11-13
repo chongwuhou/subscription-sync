@@ -74,15 +74,22 @@ const ADMIN_HTML = `<!doctype html>
     .aggregate-title { margin: 0; color: #1d3475; font-size: 1.32rem; letter-spacing: -.025em; }
     .aggregate-subtitle { margin: .35rem 0 0; color: var(--muted); font-size: .9rem; line-height: 1.55; }
     .aggregate-badge { flex: 0 0 auto; padding: .35rem .62rem; color: #3554a5; border: 1px solid rgba(88,121,214,.22); border-radius: 999px; background: rgba(225,234,255,.68); font-size: .76rem; font-weight: 700; white-space: nowrap; }
-    .aggregate-primary { margin: 1rem 0 .9rem; padding: .95rem 1rem 1rem; border: 1px solid rgba(121,151,221,.25); border-radius: 18px; background: rgba(255,255,255,.55); box-shadow: inset 0 1px 0 rgba(255,255,255,.86); }
+    .aggregate-primary { margin: 1rem 0 .9rem; padding: .25rem 1rem .9rem; border: 1px solid rgba(121,151,221,.25); border-radius: 18px; background: rgba(255,255,255,.55); box-shadow: inset 0 1px 0 rgba(255,255,255,.86); }
+    .aggregate-primary > summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .7rem 0; color: #304779; font-weight: 750; cursor: pointer; list-style: none; }
+    .aggregate-primary > summary::-webkit-details-marker { display: none; }
+    .aggregate-primary > summary::after { content: "＋"; display: grid; width: 1.7rem; height: 1.7rem; place-items: center; color: var(--accent); border: 1px solid rgba(53,103,242,.25); border-radius: 50%; background: rgba(255,255,255,.62); font-size: 1.15rem; }
+    .aggregate-primary[open] > summary::after { content: "−"; background: rgba(224,235,255,.88); }
     .aggregate-primary label { margin: 0; }
     .aggregate-primary button { margin-top: .65rem; }
     .aggregate-card .status-panel { margin: .85rem 0; }
     .aggregate-custom { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(113,137,185,.16); }
     .aggregate-custom > label { margin-top: 0; }
     .aggregate-custom-note { margin-bottom: 0; line-height: 1.5; }
-    .distribution-card { margin-top: 1rem; padding: 1rem; border: 1px solid rgba(121,151,221,.25); border-radius: 18px; background: rgba(255,255,255,.48); }
-    .distribution-card > h3 { margin: 0; color: #304779; font-size: 1.05rem; }
+    .distribution-card { margin-top: 1rem; padding: .25rem 1rem 1rem; border: 1px solid rgba(121,151,221,.25); border-radius: 18px; background: rgba(255,255,255,.48); }
+    .distribution-card > summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .7rem 0; color: #304779; font-weight: 750; cursor: pointer; list-style: none; }
+    .distribution-card > summary::-webkit-details-marker { display: none; }
+    .distribution-card > summary::after { content: "＋"; display: grid; width: 1.7rem; height: 1.7rem; place-items: center; color: var(--accent); border: 1px solid rgba(53,103,242,.25); border-radius: 50%; background: rgba(255,255,255,.62); font-size: 1.15rem; }
+    .distribution-card[open] > summary::after { content: "−"; background: rgba(224,235,255,.88); }
     .distribution-card > p { margin: .35rem 0 .8rem; }
     .distribution-row { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, .95fr) minmax(0, 1.45fr) auto auto; gap: .55rem; align-items: end; margin: .65rem 0; padding: .7rem; border: 1px solid rgba(255,255,255,.78); border-radius: 14px; background: rgba(255,255,255,.52); }
     .distribution-row label { margin: 0; min-width: 0; }
@@ -448,9 +455,12 @@ const ADMIN_HTML = `<!doctype html>
       badge.textContent = "多源合并";
       header.appendChild(badge);
       card.appendChild(header);
-      const primary = document.createElement("div");
+      const primary = document.createElement("details");
       primary.className = "aggregate-primary";
-      const link = addField(primary, "aggregateLink", "汇总后的通用订阅地址", publicLinkFor(state.aggregatePublicToken), "url", location.origin + "/sub/汇总地址");
+      const primarySummary = document.createElement("summary");
+      primarySummary.textContent = "汇总后的通用订阅地址";
+      primary.appendChild(primarySummary);
+      const link = addField(primary, "aggregateLink", "订阅地址", publicLinkFor(state.aggregatePublicToken), "url", location.origin + "/sub/汇总地址");
       const copy = document.createElement("button");
       copy.type = "button";
       copy.textContent = "复制汇总地址";
@@ -496,9 +506,9 @@ const ADMIN_HTML = `<!doctype html>
       card.appendChild(custom);
       aggregateRoot.appendChild(card);
 
-      const distributionCard = document.createElement("section");
+      const distributionCard = document.createElement("details");
       distributionCard.className = "distribution-card";
-      const distributionTitle = document.createElement("h3");
+      const distributionTitle = document.createElement("summary");
       distributionTitle.textContent = "用户分发订阅（带到期展示节点）";
       distributionCard.appendChild(distributionTitle);
       const distributionNote = document.createElement("p");
