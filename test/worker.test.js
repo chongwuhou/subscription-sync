@@ -360,6 +360,9 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(pageText, /汇总自定义节点/);
   assert.match(pageText, /自定义节点位置/);
   assert.match(pageText, /已过期的旧汇总地址/);
+  assert.match(pageText, /用户分发订阅/);
+  assert.match(pageText, /到期展示文字/);
+  assert.match(pageText, /分发订阅地址/);
   assert.match(pageText, /expiredName/);
   assert.doesNotMatch(pageText, /固定链接路径 Token/);
 
@@ -386,7 +389,8 @@ test("admin API manages subscriptions and refresh interval without public access
       expiredSubscription: {
         tokens: ["old-aggregate-token-123456"],
         nodeNames: ["已到期", "请联系顾问", "请改用新地址"]
-      }
+      },
+      distributionSubscriptions: [{ displayName: "到期日期26-11-13" }]
     })
   }), env);
   assert.equal(update.status, 200);
@@ -429,6 +433,10 @@ test("admin API manages subscriptions and refresh interval without public access
     tokens: ["old-aggregate-token-123456"],
     nodeNames: ["已到期", "请联系顾问", "请改用新地址"]
   });
+  assert.equal(body.distributionSubscriptions.length, 1);
+  assert.equal(body.distributionSubscriptions[0].displayName, "到期日期26-11-13");
+  assert.match(body.distributionSubscriptions[0].publicToken, /^[A-Za-z0-9_-]{24,64}$/);
+  const distributionToken = body.distributionSubscriptions[0].publicToken;
   assert.ok(audit.controls.has("profiles"));
   assert.ok(audit.controls.has("settings"));
   await state.put("subscription-config-v1", JSON.stringify([{
@@ -500,6 +508,13 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(normalAggregateText, /Custom/);
   assert.match(normalAggregateText, /US \| One/);
   assert.ok(normalAggregateText.indexOf("Custom") < normalAggregateText.indexOf("US | One"));
+
+  const distributionResponse = await worker.fetch(new Request("https://worker.example.com/sub/" + distributionToken), env);
+  assert.equal(distributionResponse.status, 200);
+  const distributionText = await distributionResponse.text();
+  assert.match(distributionText, /到期日期26-11-13/);
+  assert.match(distributionText, /US \| One/);
+  assert.ok(distributionText.indexOf("到期日期26-11-13") < distributionText.indexOf("US | One"));
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => { throw new Error("source window closed"); };

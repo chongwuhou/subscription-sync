@@ -23,6 +23,8 @@ const CONTROL_PROFILES_KEY = "profiles";
 const CONTROL_SETTINGS_KEY = "settings";
 const CONTROL_EXPIRED_KEY = "expired-subscription";
 const CONTROL_AGGREGATE_TOKEN_KEY = "aggregate-public-token";
+const CONTROL_DISTRIBUTION_KEY = "distribution-subscriptions";
+const ADMIN_DISTRIBUTION_KEY = "subscription-distribution-v1";
 const DEFAULT_REFRESH_INTERVAL_MINUTES = 30;
 const DEFAULT_SOURCE_SNAPSHOT_RETENTION = 30;
 const MAX_INLINE_SNAPSHOT_BYTES = 1_500_000;
@@ -78,6 +80,14 @@ const ADMIN_HTML = `<!doctype html>
     .aggregate-custom { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(113,137,185,.16); }
     .aggregate-custom > label { margin-top: 0; }
     .aggregate-custom-note { margin-bottom: 0; line-height: 1.5; }
+    .distribution-card { margin-top: 1rem; padding: 1rem; border: 1px solid rgba(121,151,221,.25); border-radius: 18px; background: rgba(255,255,255,.48); }
+    .distribution-card > h3 { margin: 0; color: #304779; font-size: 1.05rem; }
+    .distribution-card > p { margin: .35rem 0 .8rem; }
+    .distribution-row { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.4fr) auto auto; gap: .55rem; align-items: end; margin: .65rem 0; padding: .7rem; border: 1px solid rgba(255,255,255,.78); border-radius: 14px; background: rgba(255,255,255,.52); }
+    .distribution-row label { margin: 0; min-width: 0; }
+    .distribution-row button { margin: 0; white-space: nowrap; }
+    .distribution-row .distribution-copy { color: #244dc6; }
+    @media (max-width: 760px) { .distribution-row { grid-template-columns: 1fr; } .distribution-row button { width: 100%; } }
     .auth-bar { display: flex; align-items: end; gap: .75rem; margin: 1.15rem 0; padding: .9rem 1rem; border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,.48); box-shadow: 0 14px 34px rgba(43,65,120,.07), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(18px) saturate(135%); }
     .auth-bar label { flex: 1 1 auto; margin: 0; }
     .auth-bar button { flex: 0 0 auto; margin: 0; }
@@ -175,6 +185,7 @@ const ADMIN_HTML = `<!doctype html>
       },
       aggregateCustomNodes: [],
       aggregateCustomNodePosition: "tail",
+      distributionSubscriptions: [],
       aggregateStatus: null,
       controlPlane: ""
     };
@@ -483,6 +494,65 @@ const ADMIN_HTML = `<!doctype html>
       custom.appendChild(customNote);
       card.appendChild(custom);
       aggregateRoot.appendChild(card);
+
+      const distributionCard = document.createElement("section");
+      distributionCard.className = "distribution-card";
+      const distributionTitle = document.createElement("h3");
+      distributionTitle.textContent = "用户分发订阅（带到期展示节点）";
+      distributionCard.appendChild(distributionTitle);
+      const distributionNote = document.createElement("p");
+      distributionNote.className = "muted";
+      distributionNote.textContent = "每行对应一个用户：填写要展示的到期文字，系统生成独立订阅地址；打开后会把该提示节点放在汇总节点最上面。与下方“已过期的旧汇总地址”互不影响。";
+      distributionCard.appendChild(distributionNote);
+      const distributionRows = document.createElement("div");
+      distributionRows.dataset.distributionRows = "true";
+      const addDistributionRow = (item = {}) => {
+        const row = document.createElement("div");
+        row.className = "distribution-row";
+        row.dataset.distributionRow = "true";
+        const displayLabel = document.createElement("label");
+        displayLabel.textContent = "到期展示文字";
+        const displayInput = document.createElement("input");
+        displayInput.type = "text";
+        displayInput.dataset.distributionDisplay = "true";
+        displayInput.value = item.displayName || "";
+        displayInput.placeholder = "例如：到期日期26-11-13";
+        displayLabel.appendChild(displayInput);
+        row.appendChild(displayLabel);
+        const linkInput = addField(row, "distributionLink", "分发订阅地址（自动生成，可修改 /sub/ 后路径）", publicLinkFor(item.publicToken), "url", location.origin + "/sub/保存后自动生成");
+        linkInput.dataset.distributionLink = "true";
+        const copyButton = document.createElement("button");
+        copyButton.type = "button";
+        copyButton.className = "distribution-copy";
+        copyButton.textContent = "复制地址";
+        copyButton.onclick = async () => {
+          const text = linkInput.value.trim();
+          if (!text) { setStatus("请先保存，系统会生成分发订阅地址"); return; }
+          try {
+            await navigator.clipboard.writeText(text);
+            setStatus("已复制用户分发订阅地址");
+          } catch {
+            linkInput.focus();
+            linkInput.select();
+            setStatus("浏览器禁止自动复制，请按 Ctrl+C 复制已选中的地址");
+          }
+        };
+        row.appendChild(copyButton);
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.textContent = "删除";
+        removeButton.onclick = () => row.remove();
+        row.appendChild(removeButton);
+        distributionRows.appendChild(row);
+      };
+      (state.distributionSubscriptions || []).forEach(addDistributionRow);
+      distributionCard.appendChild(distributionRows);
+      const addDistributionButton = document.createElement("button");
+      addDistributionButton.type = "button";
+      addDistributionButton.textContent = "新增用户分发地址";
+      addDistributionButton.onclick = () => addDistributionRow();
+      distributionCard.appendChild(addDistributionButton);
+      aggregateRoot.appendChild(distributionCard);
 
       const expiredCard = document.createElement("details");
       expiredCard.className = "expired-card";
@@ -802,6 +872,7 @@ const ADMIN_HTML = `<!doctype html>
         state.clashConfig = data.clashConfig || state.clashConfig;
         state.aggregateCustomNodes = Array.isArray(data.aggregateCustomNodes) ? data.aggregateCustomNodes : [];
         state.aggregateCustomNodePosition = data.aggregateCustomNodePosition || "tail";
+        state.distributionSubscriptions = Array.isArray(data.distributionSubscriptions) ? data.distributionSubscriptions : [];
         interval.value = state.refreshIntervalMinutes;
         interval.disabled = false;
         setEnabled(true);
@@ -843,13 +914,18 @@ const ADMIN_HTML = `<!doctype html>
         const expiredNodeNames = [0, 1, 2].map((index) => aggregateRoot.querySelector("[data-field='expiredName" + index + "']")?.value.trim() || "");
         const aggregateCustomNodes = aggregateRoot.querySelector("[data-field='aggregateCustomNodes']")?.value.split(/\\r?\\n/).map((item) => item.trim()).filter(Boolean) || [];
         const aggregateCustomNodePosition = aggregateRoot.querySelector("[data-field='aggregateCustomNodePosition']")?.value || "tail";
+        const distributionSubscriptions = Array.from(aggregateRoot.querySelectorAll("[data-distribution-row='true']")).map((row, index) => ({
+          displayName: row.querySelector("[data-distribution-display='true']")?.value.trim() || "",
+          publicToken: publicTokenFromLink(row.querySelector("[data-distribution-link='true']")?.value || "", index)
+        }));
+        if (distributionSubscriptions.some((item) => !item.displayName)) throw new Error("用户分发订阅的到期展示文字不能留空");
         if (expiredNodeNames.some((name) => !name)) throw new Error("过期提示节点名称不能留空");
         if (subscriptions.length === 0) throw new Error("当前没有订阅配置，请先点击“新增订阅”并填写完整后再保存");
-        await api("/api/admin/subscriptions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscriptions, aggregatePublicToken, expiredSubscription: { tokens: expiredTokens, nodeNames: expiredNodeNames } }) });
+        await api("/api/admin/subscriptions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscriptions, aggregatePublicToken, expiredSubscription: { tokens: expiredTokens, nodeNames: expiredNodeNames }, distributionSubscriptions }) });
         const settingsResult = await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value), clashConfig, aggregateCustomNodes, aggregateCustomNodePosition }) });
         const scope = focusIndex ? "第 " + focusIndex + " 个订阅（同时保留并提交全部配置）" : "全部 " + subscriptions.length + " 个订阅";
         await load();
-        setStatus("保存成功：已保存" + scope + "、分流配置、刷新间隔及汇总自定义节点到 D1（KV 已同步为兼容缓存，已识别 " + Number(settingsResult.aggregateCustomNodeCount || 0) + " 个自定义节点）。");
+        setStatus("保存成功：已保存" + scope + "、分流配置、刷新间隔、汇总自定义节点和 " + distributionSubscriptions.length + " 个用户分发地址到 D1（KV 已同步为兼容缓存，已识别 " + Number(settingsResult.aggregateCustomNodeCount || 0) + " 个自定义节点）。");
       } catch (error) { setStatus(error.message); }
     }
     document.getElementById("save").onclick = () => saveAll();
@@ -1206,6 +1282,70 @@ async function saveExpiredSubscription(env, value) {
   return normalized;
 }
 
+function normalizeDistributionDisplayName(value) {
+  return String(value ?? "")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+}
+
+function normalizeDistributionSubscriptions(value) {
+  const items = Array.isArray(value) ? value : [];
+  const seen = new Set();
+  return items.map((item) => {
+    const displayName = normalizeDistributionDisplayName(item?.displayName ?? item?.name);
+    const publicToken = String(item?.publicToken ?? "").trim();
+    if (!displayName || !/^[A-Za-z0-9_-]{1,128}$/.test(publicToken) || seen.has(publicToken)) return null;
+    seen.add(publicToken);
+    return { displayName, publicToken };
+  }).filter(Boolean).slice(0, 200);
+}
+
+function prepareDistributionSubscriptions(value, reservedTokens = new Set()) {
+  if (!Array.isArray(value)) return { items: null, error: "distributionSubscriptions must be an array" };
+  if (value.length > 200) return { items: null, error: "最多只能设置 200 个用户分发地址" };
+  const seen = new Set(reservedTokens);
+  const items = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const item = value[index] && typeof value[index] === "object" ? value[index] : {};
+    const displayName = normalizeDistributionDisplayName(item.displayName ?? item.name);
+    if (!displayName) return { items: null, error: `用户分发订阅第 ${index + 1} 行的到期展示文字不能为空` };
+    let publicToken = String(item.publicToken ?? "").trim();
+    if (publicToken && !/^[A-Za-z0-9_-]{1,128}$/.test(publicToken)) {
+      return { items: null, error: `用户分发订阅第 ${index + 1} 行的地址路径格式不正确` };
+    }
+    if (!publicToken) {
+      do { publicToken = createPublicToken(); } while (seen.has(publicToken));
+    }
+    if (seen.has(publicToken)) return { items: null, error: `用户分发订阅第 ${index + 1} 行的地址与其他订阅重复` };
+    seen.add(publicToken);
+    items.push({ displayName, publicToken });
+  }
+  return { items, error: null };
+}
+
+async function loadDistributionSubscriptionsFromLegacy(env) {
+  if (!env.SUBSCRIPTION_STATE?.get) return [];
+  const stored = await env.SUBSCRIPTION_STATE.get(ADMIN_DISTRIBUTION_KEY);
+  if (stored === null) return [];
+  try { return normalizeDistributionSubscriptions(JSON.parse(stored)); } catch { return []; }
+}
+
+async function loadDistributionSubscriptions(env) {
+  const result = await loadCanonicalValue(env, CONTROL_DISTRIBUTION_KEY, () => loadDistributionSubscriptionsFromLegacy(env));
+  return normalizeDistributionSubscriptions(result.value);
+}
+
+async function saveDistributionSubscriptions(env, value) {
+  const normalized = normalizeDistributionSubscriptions(value);
+  await writeControlValue(env, CONTROL_DISTRIBUTION_KEY, normalized);
+  if (env.SUBSCRIPTION_STATE?.put) {
+    await env.SUBSCRIPTION_STATE.put(ADMIN_DISTRIBUTION_KEY, JSON.stringify(normalized));
+  }
+  return normalized;
+}
+
 async function loadSettingsFromLegacy(env) {
   if (env.SUBSCRIPTION_STATE?.get) {
     const stored = await env.SUBSCRIPTION_STATE.get(ADMIN_SETTINGS_KEY);
@@ -1318,6 +1458,7 @@ async function handleAdminApi(request, env, url) {
     const current = await storedProfiles(env);
     const settings = await loadSettings(env);
     const expiredSubscription = await loadExpiredSubscription(env);
+    const distributionSubscriptions = await loadDistributionSubscriptions(env);
     const aggregatePublicToken = await ensureAggregateToken(env);
     const subscriptions = await Promise.all(current.profiles.map(async (profile) => {
       const d1Meta = await loadLatestSourceSnapshotMeta(env, profile.id);
@@ -1347,6 +1488,7 @@ async function handleAdminApi(request, env, url) {
       clashConfig: settings.clashConfig,
       aggregateCustomNodes: settings.aggregateCustomNodes,
       aggregateCustomNodePosition: settings.aggregateCustomNodePosition,
+      distributionSubscriptions,
       aggregateStatus,
       controlPlane: await ensureControlPlaneSchema(env) ? "d1" : "kv-fallback"
     });
@@ -1379,11 +1521,22 @@ async function handleAdminApi(request, env, url) {
         return json({ error: "current aggregate address cannot also be marked expired" }, 400);
       }
       const aggregatePublicToken = await ensureAggregateToken(env, requestedAggregateToken);
+      const distributionInput = Object.prototype.hasOwnProperty.call(body ?? {}, "distributionSubscriptions")
+        ? body.distributionSubscriptions
+        : await loadDistributionSubscriptions(env);
+      const reservedTokens = new Set([
+        ...checked.profiles.map((profile) => profile.publicToken),
+        aggregatePublicToken,
+        ...expiredSubscriptionInput.tokens
+      ].filter(Boolean));
+      const preparedDistribution = prepareDistributionSubscriptions(distributionInput, reservedTokens);
+      if (preparedDistribution.error) return json({ error: preparedDistribution.error }, 400);
       await writeControlValue(env, CONTROL_PROFILES_KEY, checked.profiles);
       await env.SUBSCRIPTION_STATE.put(ADMIN_CONFIG_KEY, JSON.stringify(checked.profiles));
       const expiredSubscription = await saveExpiredSubscription(env, expiredSubscriptionInput);
+      const distributionSubscriptions = await saveDistributionSubscriptions(env, preparedDistribution.items);
       await reprocessConfiguredProfiles(env, checked.profiles);
-      return json({ ok: true, count: checked.profiles.length, expiredSubscription });
+      return json({ ok: true, count: checked.profiles.length, expiredSubscription, distributionSubscriptions });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "invalid-json" }, 400);
     }
@@ -1592,8 +1745,10 @@ async function handleAdminApi(request, env, url) {
     await deleteControlValue(env, CONTROL_SETTINGS_KEY);
     await deleteControlValue(env, CONTROL_EXPIRED_KEY);
     await deleteControlValue(env, CONTROL_AGGREGATE_TOKEN_KEY);
+    await deleteControlValue(env, CONTROL_DISTRIBUTION_KEY);
     await env.SUBSCRIPTION_STATE.delete(ADMIN_CONFIG_KEY);
     await env.SUBSCRIPTION_STATE.delete(ADMIN_EXPIRED_KEY);
+    await env.SUBSCRIPTION_STATE.delete(ADMIN_DISTRIBUTION_KEY);
     await env.SUBSCRIPTION_STATE.delete(AGGREGATE_PUBLIC_TOKEN_KEY);
     await env.SUBSCRIPTION_STATE.delete(stateKey(AGGREGATE_STATE_ID));
     return json({ ok: true, managed: false });
@@ -2142,6 +2297,23 @@ async function serveExpiredSubscription(env, expiredSubscription, request) {
   }
 }
 
+async function serveDistributionSubscription(env, distributionSubscription, request) {
+  const state = await loadState(env, AGGREGATE_STATE_ID);
+  if (!state?.nodes?.length) return new Response("No valid aggregate subscription has been published yet", { status: 503 });
+  const target = detectTarget(request, "clash");
+  if (!target || !supportedTargets.includes(target)) {
+    return json({ error: "unsupported-target", supportedTargets }, 406);
+  }
+  try {
+    const settings = await loadSettings(env);
+    const displayNode = buildExpiredDisplayNodes([distributionSubscription.displayName]);
+    const rendered = renderSubscription([...displayNode, ...state.nodes], target, settings.clashConfig);
+    return responseFromRendered(rendered);
+  } catch {
+    return new Response("Distribution subscription output is unavailable", { status: 503 });
+  }
+}
+
 async function servePublishedState(env, stateId, defaultTarget, request) {
   const state = await loadState(env, stateId);
   if (!state?.output) return new Response("No valid subscription has been published yet", { status: 503 });
@@ -2191,6 +2363,10 @@ export default {
       const aggregateToken = await loadAggregateToken(env);
       if (token && aggregateToken && token === aggregateToken) {
         return servePublishedState(env, AGGREGATE_STATE_ID, "clash", request);
+      }
+      const distributionSubscription = (await loadDistributionSubscriptions(env)).find((item) => item.publicToken === token);
+      if (token && distributionSubscription) {
+        return serveDistributionSubscription(env, distributionSubscription, request);
       }
       const expiredSubscription = await loadExpiredSubscription(env);
       if (token && expiredSubscription.tokens.includes(token)) {
