@@ -47,6 +47,17 @@ proxies:
   assert.equal(candidate.validCount, 1);
   assert.match(candidate.output, /type: anytls/);
   assert.match(candidate.output, /alpn: \[\]/);
+
+  const emptyStringAlpn = await buildCandidate(`
+proxies:
+  - name: AnyTLS empty string
+    type: anytls
+    server: anytls.example.com
+    port: 443
+    password: test-password
+    alpn: ""
+`);
+  assert.match(emptyStringAlpn.output, /alpn: \[\]/);
 });
 
 test("filters source names before rename and keeps the unfiltered history", async () => {
