@@ -243,7 +243,7 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.equal(page.status, 200);
   assert.match(await page.text(), /输入管理员令牌/);
   const pageText = await (await worker.fetch(new Request("https://worker.example.com/admin"), env)).text();
-  assert.match(pageText, /Cloudflare KV/);
+  assert.match(pageText, /Cloudflare D1/);
   assert.match(pageText, /节点改名规则（按顺序执行）/);
   assert.match(pageText, /添加一行规则/);
   assert.match(pageText, /正则模式/);

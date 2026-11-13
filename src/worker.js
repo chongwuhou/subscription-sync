@@ -90,7 +90,7 @@ const ADMIN_HTML = `<!doctype html>
   <div id="clash-settings"></div>
   <div id="aggregate"></div>
   <div id="profiles"></div>
-  <div class="actions-bottom"><button id="save-bottom" disabled>保存订阅配置</button><span class="muted"> 保存后会保留在 Cloudflare KV</span></div>
+  <div class="actions-bottom"><button id="save-bottom" disabled>保存订阅配置</button><span class="muted"> 保存后以 D1 为准，KV 只作兼容缓存</span></div>
   <script>
     const state = {
       token: "",
