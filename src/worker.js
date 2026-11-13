@@ -519,16 +519,19 @@ const ADMIN_HTML = `<!doctype html>
       distributionCard.appendChild(distributionTitle);
       const distributionNote = document.createElement("p");
       distributionNote.className = "muted";
-      distributionNote.textContent = "每行对应一个用户：备注只供你在后台识别；到期日期会生成“到期日期”提示节点。续费时可在下方自动列表直接改日期，保存后会自动恢复正常分发。";
+      distributionNote.textContent = "每行对应一个用户：备注只供你在后台识别；未到期的地址显示在这里，到期日期会生成“到期日期”提示节点。到期后会自动移动到下方续费列表。";
       distributionCard.appendChild(distributionNote);
       const distributionRows = document.createElement("div");
       distributionRows.dataset.distributionRows = "true";
       const distributionRowsByToken = new Map();
+      const chinaDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).format(new Date());
+      const distributionItems = Array.isArray(state.distributionSubscriptions) ? state.distributionSubscriptions : [];
       const addDistributionRow = (item = {}) => {
         const row = document.createElement("div");
         row.className = "distribution-row";
         row.dataset.distributionRow = "true";
         row.dataset.distributionToken = item.publicToken || "";
+        row.hidden = Boolean(item.expiresOn && item.expiresOn <= chinaDate);
         const noteLabel = document.createElement("label");
         noteLabel.textContent = "备注名称（仅自己可见）";
         const noteInput = document.createElement("input");
@@ -573,7 +576,7 @@ const ADMIN_HTML = `<!doctype html>
         distributionRows.appendChild(row);
         if (item.publicToken) distributionRowsByToken.set(item.publicToken, row);
       };
-      (state.distributionSubscriptions || []).forEach(addDistributionRow);
+      distributionItems.forEach(addDistributionRow);
       distributionCard.appendChild(distributionRows);
       const addDistributionButton = document.createElement("button");
       addDistributionButton.type = "button";
@@ -617,15 +620,14 @@ const ADMIN_HTML = `<!doctype html>
       expiredBody.appendChild(autoExpiredTitle);
       const autoExpiredList = document.createElement("div");
       autoExpiredList.className = "auto-expired-list";
-      const chinaDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).format(new Date());
-      const distributionItems = Array.isArray(state.distributionSubscriptions) ? state.distributionSubscriptions : [];
-      if (distributionItems.length === 0) {
+      const expiredDistributionItems = distributionItems.filter((item) => item.expiresOn && item.expiresOn <= chinaDate);
+      if (expiredDistributionItems.length === 0) {
         const emptyAuto = document.createElement("p");
         emptyAuto.className = "muted";
-        emptyAuto.textContent = "暂无用户分发地址；新增后，到期日期会自动显示在这里。";
+        emptyAuto.textContent = "暂无已到期分发地址；未到期的分发地址显示在上方。";
         autoExpiredList.appendChild(emptyAuto);
       } else {
-        distributionItems.forEach((item) => {
+        expiredDistributionItems.forEach((item) => {
           const autoRow = document.createElement("div");
           autoRow.className = "auto-expired-row";
           const autoMeta = document.createElement("div");
