@@ -72,9 +72,21 @@ const ADMIN_HTML = `<!doctype html>
     .expired-card > summary::after { content: "＋"; display: grid; width: 1.7rem; height: 1.7rem; place-items: center; color: var(--accent); border: 1px solid rgba(53,103,242,.25); border-radius: 50%; background: rgba(255,255,255,.62); font-size: 1.15rem; transition: transform .18s ease, background .18s ease; }
     .expired-card[open] > summary::after { content: "−"; background: rgba(224,235,255,.88); }
     .expired-card-body { padding-top: .35rem; }
-    .profile-card { margin: 1rem 0; padding: .5rem .95rem .95rem; border: 1px solid var(--line); border-radius: 22px; background: rgba(255,255,255,.42); box-shadow: 0 18px 48px rgba(43,65,120,.08), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(20px) saturate(135%); }
-    .profile-card > summary { cursor: pointer; font-weight: 750; padding: .7rem .25rem; color: #233c7e; }
+    .profile-card { margin: 1rem 0; padding: .35rem .85rem .95rem; border: 1px solid var(--line); border-radius: 22px; background: rgba(255,255,255,.42); box-shadow: 0 18px 48px rgba(43,65,120,.08), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(20px) saturate(135%); }
+    .profile-card > summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; cursor: pointer; font-weight: 750; padding: .8rem .35rem; color: #233c7e; list-style: none; }
+    .profile-card > summary::-webkit-details-marker { display: none; }
+    .profile-card > summary::after { content: "＋"; display: grid; width: 1.8rem; height: 1.8rem; flex: 0 0 auto; place-items: center; color: var(--accent); border: 1px solid rgba(53,103,242,.25); border-radius: 50%; background: rgba(255,255,255,.62); font-size: 1.15rem; transition: transform .18s ease, background .18s ease; }
+    .profile-card[open] > summary::after { content: "−"; background: rgba(224,235,255,.88); }
     .profile-card fieldset { margin: .5rem 0 0; padding: 0; border: 0; }
+    .profile-section { margin: .7rem 0; padding: .05rem .9rem .7rem; border: 1px solid rgba(255,255,255,.72); border-radius: 17px; background: rgba(255,255,255,.34); box-shadow: inset 0 1px 0 rgba(255,255,255,.82); }
+    .profile-section > summary { display: flex; align-items: center; padding: .7rem 0; color: #304779; font-weight: 750; cursor: pointer; list-style: none; }
+    .profile-section > summary::-webkit-details-marker { display: none; }
+    .profile-section > summary::before { content: "▸"; display: inline-block; width: 1.2rem; color: var(--accent); transition: transform .18s ease; }
+    .profile-section[open] > summary::before { transform: rotate(90deg); }
+    .profile-section-hint { margin: -.25rem 0 .7rem 1.2rem; color: var(--muted); font-size: .84rem; font-weight: 500; }
+    .profile-section-body { padding-bottom: .2rem; }
+    .profile-section-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 .8rem; }
+    .profile-section-grid > label { min-width: 0; }
     .preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; margin: .8rem 0; }
     .preview-pane { border: 1px solid rgba(255,255,255,.72); border-radius: 15px; padding: .75rem; min-width: 0; background: rgba(255,255,255,.46); box-shadow: inset 0 1px 0 rgba(255,255,255,.8); }
     .preview-pane h3 { margin: 0 0 .4rem; font-size: 1rem; }
@@ -100,7 +112,7 @@ const ADMIN_HTML = `<!doctype html>
     @media (max-width: 720px) { .rename-rule-row { grid-template-columns: 1fr; } }
     @media (max-width: 720px) { .preview-grid { grid-template-columns: 1fr; } }
     .actions-bottom { position: sticky; bottom: 1rem; margin: 1rem 0 3rem; padding: .75rem .9rem; background: rgba(255,255,255,.7); border: 1px solid var(--line); border-radius: 17px; box-shadow: 0 14px 34px rgba(43,65,120,.12), inset 0 1px 0 rgba(255,255,255,.9); backdrop-filter: blur(18px); }
-    @media (max-width: 760px) { .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } body { padding-top: 2rem; } }
+    @media (max-width: 760px) { .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .profile-section-grid { grid-template-columns: 1fr; } body { padding-top: 2rem; } }
     @media (max-width: 460px) { .overview-grid { grid-template-columns: 1fr 1fr; gap: .55rem; } .overview-card { min-height: 90px; padding: .75rem; } .overview-value { font-size: 1.35rem; } }
   </style>
 </head>
@@ -470,6 +482,25 @@ const ADMIN_HTML = `<!doctype html>
       details.appendChild(help);
       clashSettingsRoot.appendChild(details);
     }
+    function createProfileSection(parent, title, hint, open = true) {
+      const section = document.createElement("details");
+      section.className = "profile-section";
+      section.open = open;
+      const summary = document.createElement("summary");
+      summary.textContent = title;
+      section.appendChild(summary);
+      if (hint) {
+        const note = document.createElement("div");
+        note.className = "profile-section-hint";
+        note.textContent = hint;
+        section.appendChild(note);
+      }
+      const body = document.createElement("div");
+      body.className = "profile-section-body";
+      section.appendChild(body);
+      parent.appendChild(section);
+      return body;
+    }
     function render() {
       renderOverview();
       renderClashSettings();
@@ -491,8 +522,9 @@ const ADMIN_HTML = `<!doctype html>
         profileCard.appendChild(summary);
         const card = document.createElement("fieldset");
         renderStatusPanel(card, "刷新状态", profile.status, profile.paused ? "自动更新已暂停" : "自动更新中");
-        addField(card, "id", "订阅名称 / ID（唯一）", profile.id, "text", "例如：主订阅 或 backup");
-        addField(card, "sourceUrl", "完整源头订阅地址（把 ?token=... 一起粘贴，仅管理员可见）", profile.sourceUrl, "url", "https://供应商.example/subscribe?token=...");
+        const sourceSection = createProfileSection(card, "源头与历史", "源头地址、手动备用文件和历史内容版本", true);
+        addField(sourceSection, "id", "订阅名称 / ID（唯一）", profile.id, "text", "例如：主订阅 或 backup");
+        addField(sourceSection, "sourceUrl", "完整源头订阅地址（把 ?token=... 一起粘贴，仅管理员可见）", profile.sourceUrl, "url", "https://供应商.example/subscribe?token=...");
         const uploadLabel = document.createElement("label");
         uploadLabel.textContent = "手动上传 YAML（源站不可用时作为历史源）";
         const uploadInput = document.createElement("input");
@@ -503,7 +535,7 @@ const ADMIN_HTML = `<!doctype html>
         uploadName.className = "muted";
         uploadInput.onchange = () => { uploadName.textContent = uploadInput.files?.[0]?.name ? " 已选择：" + uploadInput.files[0].name : ""; };
         uploadLabel.appendChild(uploadName);
-        card.appendChild(uploadLabel);
+        sourceSection.appendChild(uploadLabel);
         const uploadButton = document.createElement("button");
         uploadButton.type = "button";
         uploadButton.textContent = "上传并保存历史源";
@@ -524,12 +556,12 @@ const ADMIN_HTML = `<!doctype html>
           } catch (error) { setStatus(error.message); }
           finally { uploadButton.disabled = false; }
         };
-        card.appendChild(uploadButton);
+        sourceSection.appendChild(uploadButton);
         if (profile.capturedAt) {
           const historyNote = document.createElement("p");
           historyNote.className = "muted";
           historyNote.textContent = "已绑定历史源（" + (profile.sourceStorage === "d1" ? "D1" : "KV 兜底") + "）：" + (profile.validCount || 0) + " 个有效节点，保存于 " + new Date(profile.capturedAt).toLocaleString();
-          card.appendChild(historyNote);
+          sourceSection.appendChild(historyNote);
         }
         const historyVersions = Array.isArray(profile.historyVersions) ? profile.historyVersions : [];
         const historyPanel = document.createElement("details");
@@ -591,8 +623,9 @@ const ADMIN_HTML = `<!doctype html>
             historyPanel.appendChild(row);
           });
         }
-        card.appendChild(historyPanel);
-        const publicLinkInput = addField(card, "publicLink", "修改后的通用订阅地址（可修改 /sub/ 后面的路径）", publicLinkFor(profile.publicToken), "url", location.origin + "/sub/保存后自动生成");
+        sourceSection.appendChild(historyPanel);
+        const outputSection = createProfileSection(card, "输出地址与发布保护", "固定订阅链接、最低有效节点数；节点不足时不会覆盖旧版本", true);
+        const publicLinkInput = addField(outputSection, "publicLink", "修改后的通用订阅地址（可修改 /sub/ 后面的路径）", publicLinkFor(profile.publicToken), "url", location.origin + "/sub/保存后自动生成");
         const copyLink = document.createElement("button");
         copyLink.type = "button";
         copyLink.textContent = "复制地址";
@@ -608,8 +641,9 @@ const ADMIN_HTML = `<!doctype html>
             setStatus("浏览器禁止自动复制，请按 Ctrl+C 复制已选中的地址");
           }
         };
-        card.appendChild(copyLink);
-        addField(card, "minValidNodes", "最低有效节点数", profile.minValidNodes || 1, "number");
+        outputSection.appendChild(copyLink);
+        addField(outputSection, "minValidNodes", "最低有效节点数", profile.minValidNodes || 1, "number");
+        const filterSection = createProfileSection(card, "节点筛选", "先按源节点原始名称筛选，再执行改名规则；全部留空就是不过滤", true);
         const filterRules = document.createElement("section");
         filterRules.className = "filter-rules";
         const filterTitle = document.createElement("div");
@@ -623,11 +657,13 @@ const ADMIN_HTML = `<!doctype html>
         filterHelp.className = "muted";
         filterHelp.textContent = "示例：必须包含填 VIP2，以下任意一个填 美国1|美国2|美国3，排除任意一个填 到期|续费，最终就是 VIP2 且（美国1/美国2/美国3 任意一个），并排除到期或续费。先过滤原始节点名称，再执行改名规则。三项都留空就是不过滤。";
         filterRules.appendChild(filterHelp);
-        card.appendChild(filterRules);
-        addCheckbox(card, "paused", "暂停自动更新（固定当前已发布版本）", profile.paused === true);
-        addField(card, "defaultTarget", "无法识别客户端时的格式（clash/base64/sing-box/links）", profile.defaultTarget || "clash", "text", "clash");
-        addCheckbox(card, "replaceAllFields", "允许替换节点全部字段（高级；默认只替换名称）", profile.replaceAllFields);
-        const renameRulesEditor = renderRenameRulesEditor(card, profile.renameRules || []);
+        filterSection.appendChild(filterRules);
+        const transformSection = createProfileSection(card, "改名与客户端兼容", "默认只改节点名称；需要时再启用高级字段替换", false);
+        addCheckbox(transformSection, "paused", "暂停自动更新（固定当前已发布版本）", profile.paused === true);
+        addField(transformSection, "defaultTarget", "无法识别客户端时的格式（clash / base64 / sing-box / links）", profile.defaultTarget || "clash", "text", "clash");
+        addCheckbox(transformSection, "replaceAllFields", "允许替换节点全部字段（高级；默认只替换名称）", profile.replaceAllFields);
+        const renameRulesEditor = renderRenameRulesEditor(transformSection, profile.renameRules || []);
+        const actionsSection = createProfileSection(card, "预览与操作", "先预览规则结果，确认无误后保存", false);
         const previewButton = document.createElement("button");
         previewButton.type = "button";
         previewButton.textContent = "预览原版 / 规则修改后";
@@ -649,18 +685,18 @@ const ADMIN_HTML = `<!doctype html>
           } catch (error) { setStatus(error.message); }
           finally { previewButton.disabled = false; }
         };
-        card.appendChild(previewButton);
-        card.appendChild(previewGrid);
+        actionsSection.appendChild(previewButton);
+        actionsSection.appendChild(previewGrid);
         const saveOne = document.createElement("button");
         saveOne.type = "button";
         saveOne.textContent = "保存本订阅";
         saveOne.onclick = () => saveAll(index + 1);
-        card.appendChild(saveOne);
+        actionsSection.appendChild(saveOne);
         const remove = document.createElement("button");
         remove.type = "button";
         remove.textContent = "删除此订阅";
         remove.onclick = () => { state.profiles.splice(index, 1); render(); };
-        card.appendChild(remove);
+        actionsSection.appendChild(remove);
         profileCard.appendChild(card);
         root.appendChild(profileCard);
       });
