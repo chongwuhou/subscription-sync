@@ -59,6 +59,19 @@ const ADMIN_HTML = `<!doctype html>
     .overview-card { min-height: 104px; padding: 1rem 1.05rem; border: 1px solid var(--line); border-radius: 20px; background: var(--glass); box-shadow: 0 14px 38px rgba(43,65,120,.08), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(18px) saturate(135%); }
     .overview-value { display: block; margin-top: .22rem; color: #213f9f; font-size: 1.7rem; font-weight: 760; letter-spacing: -.03em; }
     .overview-label { color: var(--muted); font-size: .84rem; font-weight: 650; }
+    .aggregate-card { margin: 1.1rem 0; padding: 1.25rem 1.35rem 1.15rem; border: 1px solid rgba(255,255,255,.82); border-radius: 26px; background: linear-gradient(145deg, rgba(255,255,255,.73), rgba(244,247,255,.48)); box-shadow: 0 20px 52px rgba(43,65,120,.1), inset 0 1px 0 rgba(255,255,255,.92); backdrop-filter: blur(24px) saturate(140%); }
+    .aggregate-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: .1rem 0 1rem; border-bottom: 1px solid rgba(113,137,185,.16); }
+    .aggregate-kicker { margin-bottom: .25rem; color: #5271c3; font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    .aggregate-title { margin: 0; color: #1d3475; font-size: 1.32rem; letter-spacing: -.025em; }
+    .aggregate-subtitle { margin: .35rem 0 0; color: var(--muted); font-size: .9rem; line-height: 1.55; }
+    .aggregate-badge { flex: 0 0 auto; padding: .35rem .62rem; color: #3554a5; border: 1px solid rgba(88,121,214,.22); border-radius: 999px; background: rgba(225,234,255,.68); font-size: .76rem; font-weight: 700; white-space: nowrap; }
+    .aggregate-primary { margin: 1rem 0 .9rem; padding: .95rem 1rem 1rem; border: 1px solid rgba(121,151,221,.25); border-radius: 18px; background: rgba(255,255,255,.55); box-shadow: inset 0 1px 0 rgba(255,255,255,.86); }
+    .aggregate-primary label { margin: 0; }
+    .aggregate-primary button { margin-top: .65rem; }
+    .aggregate-card .status-panel { margin: .85rem 0; }
+    .aggregate-custom { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(113,137,185,.16); }
+    .aggregate-custom > label { margin-top: 0; }
+    .aggregate-custom-note { margin-bottom: 0; line-height: 1.5; }
     .auth-bar { display: flex; align-items: end; gap: .75rem; margin: 1.15rem 0; padding: .9rem 1rem; border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,.48); box-shadow: 0 14px 34px rgba(43,65,120,.07), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(18px) saturate(135%); }
     .auth-bar label { flex: 1 1 auto; margin: 0; }
     .auth-bar button { flex: 0 0 auto; margin: 0; }
@@ -115,8 +128,12 @@ const ADMIN_HTML = `<!doctype html>
     .rename-rule-row .remove-rule { margin: 0; }
     @media (max-width: 720px) { .rename-rule-row { grid-template-columns: 1fr; } }
     @media (max-width: 720px) { .preview-grid { grid-template-columns: 1fr; } }
-    .actions-bottom { position: sticky; bottom: 1rem; margin: 1rem 0 3rem; padding: .75rem .9rem; background: rgba(255,255,255,.7); border: 1px solid var(--line); border-radius: 17px; box-shadow: 0 14px 34px rgba(43,65,120,.12), inset 0 1px 0 rgba(255,255,255,.9); backdrop-filter: blur(18px); }
-    @media (max-width: 760px) { .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .profile-section-grid { grid-template-columns: 1fr; } .auth-bar { align-items: stretch; flex-direction: column; } .auth-bar button { width: 100%; } .auth-note { padding-bottom: 0; } body { padding-top: 2rem; } }
+    .actions-bottom { position: sticky; bottom: 1rem; z-index: 5; display: flex; align-items: center; gap: .8rem; margin: 1rem 0 3rem; padding: .8rem .95rem; background: rgba(255,255,255,.76); border: 1px solid var(--line); border-radius: 19px; box-shadow: 0 14px 34px rgba(43,65,120,.12), inset 0 1px 0 rgba(255,255,255,.9); backdrop-filter: blur(18px); }
+    .actions-bottom button { flex: 0 0 auto; }
+    .save-note { display: grid; gap: .12rem; }
+    .save-note strong { color: #304779; font-size: .9rem; }
+    .save-note small { color: var(--muted); font-size: .78rem; }
+    @media (max-width: 760px) { .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .profile-section-grid { grid-template-columns: 1fr; } .auth-bar { align-items: stretch; flex-direction: column; } .auth-bar button { width: 100%; } .auth-note { padding-bottom: 0; } .aggregate-header { flex-direction: column; } .aggregate-badge { align-self: flex-start; } .actions-bottom { align-items: stretch; flex-direction: column; } .actions-bottom button { width: 100%; } body { padding-top: 2rem; } }
     @media (max-width: 460px) { .overview-grid { grid-template-columns: 1fr 1fr; gap: .55rem; } .overview-card { min-height: 90px; padding: .75rem; } .overview-value { font-size: 1.35rem; } }
   </style>
 </head>
@@ -128,7 +145,7 @@ const ADMIN_HTML = `<!doctype html>
     <button id="login" type="button">进入管理</button>
     <span class="auth-note">仅本次页面会话使用，不写入浏览器</span>
   </div>
-  <p><button id="reload" disabled>重新读取</button> <button id="save" disabled>保存订阅配置</button> <button id="refresh" disabled>立即刷新</button> <button id="add" disabled>新增订阅</button></p>
+  <p><button id="reload" disabled>重新读取</button> <button id="save" disabled>保存全部订阅配置</button> <button id="refresh" disabled>立即刷新</button> <button id="add" disabled>新增订阅</button></p>
   <label>自动刷新间隔（分钟，5-1440，按 5 分钟粒度）<input id="interval" type="number" min="5" max="1440" step="5" value="30" disabled></label>
   <p class="notice">保存后，订阅配置、改名规则、Clash 分流配置和刷新间隔以 Cloudflare D1 为最终来源，并同步 KV 兼容缓存；源订阅节点在下一次定时刷新或点击“立即刷新”后更新。源站临时不可用时使用 D1 最近一次有效快照并重新套用当前规则。只有管理员令牌可以读取源地址。</p>
   <div id="status"></div>
@@ -136,7 +153,7 @@ const ADMIN_HTML = `<!doctype html>
   <div id="clash-settings"></div>
   <div id="aggregate"></div>
   <div id="profiles"></div>
-  <div class="actions-bottom"><button id="save-bottom" disabled>保存订阅配置</button><span class="muted"> 保存后以 D1 为准，KV 只作兼容缓存</span></div>
+  <div class="actions-bottom"><button id="save-bottom" disabled>保存全部配置</button><span class="save-note"><strong>保存全部配置</strong><small>一次保存所有订阅、汇总设置、分流配置和刷新间隔；D1 为最终数据源</small></span></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script>
     const state = {
@@ -390,11 +407,32 @@ const ADMIN_HTML = `<!doctype html>
     }
     function renderAggregate() {
       aggregateRoot.replaceChildren();
-      const card = document.createElement("fieldset");
-      const legend = document.createElement("legend");
-      legend.textContent = "全部订阅汇总";
-      card.appendChild(legend);
-      const link = addField(card, "aggregateLink", "汇总后的通用订阅地址（所有已发布有效节点，一键订阅）", publicLinkFor(state.aggregatePublicToken), "url", location.origin + "/sub/汇总地址");
+      const card = document.createElement("section");
+      card.className = "aggregate-card";
+      const header = document.createElement("div");
+      header.className = "aggregate-header";
+      const heading = document.createElement("div");
+      const kicker = document.createElement("div");
+      kicker.className = "aggregate-kicker";
+      kicker.textContent = "AGGREGATE SUBSCRIPTION";
+      heading.appendChild(kicker);
+      const title = document.createElement("h2");
+      title.className = "aggregate-title";
+      title.textContent = "全部订阅汇总";
+      heading.appendChild(title);
+      const subtitle = document.createElement("p");
+      subtitle.className = "aggregate-subtitle";
+      subtitle.textContent = "将所有源头订阅已发布的有效节点合并成一个通用地址，客户端只需订阅这一条。";
+      heading.appendChild(subtitle);
+      header.appendChild(heading);
+      const badge = document.createElement("span");
+      badge.className = "aggregate-badge";
+      badge.textContent = "多源合并";
+      header.appendChild(badge);
+      card.appendChild(header);
+      const primary = document.createElement("div");
+      primary.className = "aggregate-primary";
+      const link = addField(primary, "aggregateLink", "汇总后的通用订阅地址", publicLinkFor(state.aggregatePublicToken), "url", location.origin + "/sub/汇总地址");
       const copy = document.createElement("button");
       copy.type = "button";
       copy.textContent = "复制汇总地址";
@@ -410,28 +448,34 @@ const ADMIN_HTML = `<!doctype html>
           setStatus("浏览器禁止自动复制，请按 Ctrl+C 复制已选中的汇总地址");
         }
       };
-      card.appendChild(copy);
+      primary.appendChild(copy);
+      card.appendChild(primary);
       const note = document.createElement("p");
       note.className = "muted";
-      note.textContent = "汇总地址会合并所有源头订阅的已发布有效节点；某个源头失效时保留它上一次的有效版本。修改 /sub/ 后面的路径后点击保存即可。";
-      card.appendChild(note);
-      renderStatusPanel(card, "汇总运行状态", state.aggregateStatus, "控制面：" + (state.controlPlane === "d1" ? "D1 权威" : "兼容回退"));
+      note.textContent = "某个源头暂时失效时，会继续保留它上一次的有效版本；修改 /sub/ 后面的路径后，点击底部“保存全部配置”即可。";
+      primary.appendChild(note);
+      const statusWrap = document.createElement("div");
+      renderStatusPanel(statusWrap, "汇总运行状态", state.aggregateStatus, "控制面：" + (state.controlPlane === "d1" ? "D1 权威" : "兼容回退"));
+      card.appendChild(statusWrap);
+      const custom = document.createElement("div");
+      custom.className = "aggregate-custom";
       addField(
-        card,
+        custom,
         "aggregateCustomNodes",
         "汇总自定义节点（每行一个完整节点链接）",
         (state.aggregateCustomNodes || []).join("\\n"),
         "textarea",
         "例如：vless://...#备用节点"
       );
-      addSelect(card, "aggregateCustomNodePosition", "自定义节点位置", state.aggregateCustomNodePosition || "tail", [
+      addSelect(custom, "aggregateCustomNodePosition", "自定义节点位置", state.aggregateCustomNodePosition || "tail", [
         { value: "top", label: "顶部" },
         { value: "tail", label: "尾部" }
       ]);
       const customNote = document.createElement("p");
-      customNote.className = "muted";
+      customNote.className = "muted aggregate-custom-note";
       customNote.textContent = "支持常见 vmess、vless、trojan、ss、ssr、hysteria2、tuic、anytls、socks5、http 节点链接；每行一个。只加入汇总订阅，不会加入单独订阅。";
-      card.appendChild(customNote);
+      custom.appendChild(customNote);
+      card.appendChild(custom);
       aggregateRoot.appendChild(card);
 
       const expiredCard = document.createElement("details");
@@ -797,7 +841,7 @@ const ADMIN_HTML = `<!doctype html>
         if (subscriptions.length === 0) throw new Error("当前没有订阅配置，请先点击“新增订阅”并填写完整后再保存");
         await api("/api/admin/subscriptions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscriptions, aggregatePublicToken, expiredSubscription: { tokens: expiredTokens, nodeNames: expiredNodeNames } }) });
         const settingsResult = await api("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ refreshIntervalMinutes: Number(interval.value), clashConfig, aggregateCustomNodes, aggregateCustomNodePosition }) });
-        const scope = focusIndex ? "第 " + focusIndex + " 个订阅" : subscriptions.length + " 个订阅";
+        const scope = focusIndex ? "第 " + focusIndex + " 个订阅（同时保留并提交全部配置）" : "全部 " + subscriptions.length + " 个订阅";
         await load();
         setStatus("保存成功：已保存" + scope + "、分流配置、刷新间隔及汇总自定义节点到 D1（KV 已同步为兼容缓存，已识别 " + Number(settingsResult.aggregateCustomNodeCount || 0) + " 个自定义节点）。");
       } catch (error) { setStatus(error.message); }
