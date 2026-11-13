@@ -66,6 +66,12 @@ const ADMIN_HTML = `<!doctype html>
     .rules-help summary { cursor: pointer; font-weight: 600; }
     .rules-help pre { overflow-x: auto; white-space: pre-wrap; font-size: .9rem; }
     .rules-help code { font-family: ui-monospace, monospace; }
+    .expired-card { margin: 1rem 0; padding: .25rem 1.25rem .9rem; border: 1px solid var(--line); border-radius: 22px; background: rgba(255,255,255,.42); box-shadow: 0 16px 42px rgba(43,65,120,.07), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(20px) saturate(135%); }
+    .expired-card > summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .8rem 0; color: #34466f; font-weight: 750; cursor: pointer; list-style: none; }
+    .expired-card > summary::-webkit-details-marker { display: none; }
+    .expired-card > summary::after { content: "＋"; display: grid; width: 1.7rem; height: 1.7rem; place-items: center; color: var(--accent); border: 1px solid rgba(53,103,242,.25); border-radius: 50%; background: rgba(255,255,255,.62); font-size: 1.15rem; transition: transform .18s ease, background .18s ease; }
+    .expired-card[open] > summary::after { content: "−"; background: rgba(224,235,255,.88); }
+    .expired-card-body { padding-top: .35rem; }
     .profile-card { margin: 1rem 0; padding: .5rem .95rem .95rem; border: 1px solid var(--line); border-radius: 22px; background: rgba(255,255,255,.42); box-shadow: 0 18px 48px rgba(43,65,120,.08), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(20px) saturate(135%); }
     .profile-card > summary { cursor: pointer; font-weight: 750; padding: .7rem .25rem; color: #233c7e; }
     .profile-card fieldset { margin: .5rem 0 0; padding: 0; border: 0; }
@@ -405,12 +411,15 @@ const ADMIN_HTML = `<!doctype html>
       card.appendChild(customNote);
       aggregateRoot.appendChild(card);
 
-      const expiredCard = document.createElement("fieldset");
-      const expiredLegend = document.createElement("legend");
-      expiredLegend.textContent = "已过期的旧汇总地址";
-      expiredCard.appendChild(expiredLegend);
+      const expiredCard = document.createElement("details");
+      expiredCard.className = "expired-card";
+      const expiredSummary = document.createElement("summary");
+      expiredSummary.textContent = "已过期的旧汇总地址（点击展开设置）";
+      expiredCard.appendChild(expiredSummary);
+      const expiredBody = document.createElement("div");
+      expiredBody.className = "expired-card-body";
       const expiredLinks = addField(
-        expiredCard,
+        expiredBody,
         "expiredLinks",
         "旧汇总订阅地址（每行一个；这些地址只显示过期提示节点）",
         (state.expiredSubscription.tokens || []).map(publicLinkFor).join("\\n"),
@@ -421,7 +430,7 @@ const ADMIN_HTML = `<!doctype html>
         ? state.expiredSubscription.nodeNames
         : ["订阅已过期", "请联系顾问", "续费后恢复"];
       [0, 1, 2].forEach((index) => addField(
-        expiredCard,
+        expiredBody,
         "expiredName" + index,
         "过期提示节点 " + (index + 1) + " 名称",
         expiredNames[index] || ["订阅已过期", "请联系顾问", "续费后恢复"][index],
@@ -431,7 +440,8 @@ const ADMIN_HTML = `<!doctype html>
       const expiredNote = document.createElement("p");
       expiredNote.className = "muted";
       expiredNote.textContent = "操作顺序：先把上面的汇总地址改成新地址，再把旧地址粘贴到这里，最后点击保存。旧地址会继续有效，但只返回这 3 个提示名称；新地址返回正常节点。";
-      expiredCard.appendChild(expiredNote);
+      expiredBody.appendChild(expiredNote);
+      expiredCard.appendChild(expiredBody);
       aggregateRoot.appendChild(expiredCard);
     }
     function parseClashConfigInput(value) {
