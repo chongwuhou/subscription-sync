@@ -69,7 +69,10 @@ const ADMIN_HTML = `<!doctype html>
     .overview-value { display: block; margin-top: .22rem; color: #213f9f; font-size: 1.7rem; font-weight: 760; letter-spacing: -.03em; }
     .overview-label { color: var(--muted); font-size: .84rem; font-weight: 650; }
     .aggregate-card { margin: 1.1rem 0; padding: 1.25rem 1.35rem 1.15rem; border: 1px solid rgba(255,255,255,.82); border-radius: 26px; background: linear-gradient(145deg, rgba(255,255,255,.73), rgba(244,247,255,.48)); box-shadow: 0 20px 52px rgba(43,65,120,.1), inset 0 1px 0 rgba(255,255,255,.92); backdrop-filter: blur(24px) saturate(140%); }
-    .aggregate-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: .1rem 0 1rem; border-bottom: 1px solid rgba(113,137,185,.16); }
+    .aggregate-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: .1rem 0 1rem; border-bottom: 1px solid rgba(113,137,185,.16); cursor: pointer; list-style: none; }
+    .aggregate-header::-webkit-details-marker { display: none; }
+    .aggregate-header::after { content: "＋"; display: grid; width: 1.8rem; height: 1.8rem; flex: 0 0 auto; place-items: center; color: var(--accent); border: 1px solid rgba(53,103,242,.25); border-radius: 50%; background: rgba(255,255,255,.62); font-size: 1.15rem; }
+    .aggregate-card[open] > .aggregate-header::after { content: "−"; background: rgba(224,235,255,.88); }
     .aggregate-kicker { margin-bottom: .25rem; color: #5271c3; font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
     .aggregate-title { margin: 0; color: #1d3475; font-size: 1.32rem; letter-spacing: -.025em; }
     .aggregate-subtitle { margin: .35rem 0 0; color: var(--muted); font-size: .9rem; line-height: 1.55; }
@@ -432,9 +435,9 @@ const ADMIN_HTML = `<!doctype html>
     }
     function renderAggregate() {
       aggregateRoot.replaceChildren();
-      const card = document.createElement("section");
+      const card = document.createElement("details");
       card.className = "aggregate-card";
-      const header = document.createElement("div");
+      const header = document.createElement("summary");
       header.className = "aggregate-header";
       const heading = document.createElement("div");
       const kicker = document.createElement("div");
