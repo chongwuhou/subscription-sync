@@ -237,6 +237,10 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(pageText, /Clash \/ Mihomo 分流配置/);
   assert.match(pageText, /Rule Providers|rule-providers/);
   assert.match(pageText, /上传并保存历史源/);
+  assert.match(pageText, /节点名称组合筛选/);
+  assert.match(pageText, /必须包含（且；多个关键词用 \| 分隔）/);
+  assert.match(pageText, /以下任意一个（或；多个关键词用 \| 分隔）/);
+  assert.match(pageText, /VIP2 且（美国1\/美国2\/美国3 任意一个）/);
   assert.match(pageText, /历史内容版本/);
   assert.match(pageText, /使用此版本/);
   assert.match(pageText, /同时暂停自动更新/);

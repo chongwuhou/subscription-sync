@@ -52,6 +52,8 @@ const ADMIN_HTML = `<!doctype html>
     .preview-pane { border: 1px solid #8885; border-radius: 6px; padding: .6rem; min-width: 0; }
     .preview-pane h3 { margin: 0 0 .4rem; font-size: 1rem; }
     .preview-pane ul { margin: 0; padding-left: 1.2rem; max-height: 16rem; overflow: auto; }
+    .filter-rules { margin: .8rem 0; padding: .7rem; border: 1px solid #8885; border-radius: 6px; }
+    .filter-rules-title { font-weight: 600; margin-bottom: .5rem; }
     .history-panel { margin: .8rem 0; padding: .65rem .75rem; border: 1px solid #8885; border-radius: 6px; }
     .history-panel > summary { cursor: pointer; font-weight: 600; }
     .history-version-row { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin: .55rem 0 0; padding: .55rem; border: 1px solid #8884; border-radius: 5px; }
@@ -499,14 +501,21 @@ const ADMIN_HTML = `<!doctype html>
         };
         card.appendChild(copyLink);
         addField(card, "minValidNodes", "最低有效节点数", profile.minValidNodes || 1, "number");
-        addField(card, "nodeNameInclude", "节点名称保留（或；多个关键词用 | 分隔，例如：美国|VIP2）", profile.nodeNameInclude || "", "text", "命中任一关键词，留空表示不限制");
-        addField(card, "nodeNameIncludeAll", "节点名称同时包含（且；多个关键词用 | 分隔，例如：美国|VIP2）", profile.nodeNameIncludeAll || "", "text", "必须同时命中全部关键词，留空表示不限制");
-        addField(card, "nodeNameExclude", "节点名称排除（可选；多个关键词用 | 分隔，例如：到期|续费）", profile.nodeNameExclude || "", "text", "留空表示不排除");
-        addCheckbox(card, "paused", "暂停自动更新（固定当前已发布版本）", profile.paused === true);
+        const filterRules = document.createElement("section");
+        filterRules.className = "filter-rules";
+        const filterTitle = document.createElement("div");
+        filterTitle.className = "filter-rules-title";
+        filterTitle.textContent = "节点名称组合筛选（可留空）";
+        filterRules.appendChild(filterTitle);
+        addField(filterRules, "nodeNameIncludeAll", "必须包含（且；多个关键词用 | 分隔）", profile.nodeNameIncludeAll || "", "text", "例如：VIP2");
+        addField(filterRules, "nodeNameInclude", "以下任意一个（或；多个关键词用 | 分隔）", profile.nodeNameInclude || "", "text", "例如：美国1|美国2|美国3");
+        addField(filterRules, "nodeNameExclude", "排除任意一个（多个关键词用 | 分隔）", profile.nodeNameExclude || "", "text", "例如：到期|续费");
         const filterHelp = document.createElement("p");
         filterHelp.className = "muted";
-        filterHelp.textContent = "处理顺序：先按原始节点名称过滤，再执行改名规则；“或”命中任一，“且”必须全部命中，排除命中任一就排除；关键词是不区分大小写的名称包含匹配。三项都留空就是不过滤。";
-        card.appendChild(filterHelp);
+        filterHelp.textContent = "示例：必须包含填 VIP2，以下任意一个填 美国1|美国2|美国3，排除任意一个填 到期|续费，最终就是 VIP2 且（美国1/美国2/美国3 任意一个），并排除到期或续费。先过滤原始节点名称，再执行改名规则。三项都留空就是不过滤。";
+        filterRules.appendChild(filterHelp);
+        card.appendChild(filterRules);
+        addCheckbox(card, "paused", "暂停自动更新（固定当前已发布版本）", profile.paused === true);
         addField(card, "defaultTarget", "无法识别客户端时的格式（clash/base64/sing-box/links）", profile.defaultTarget || "clash", "text", "clash");
         addCheckbox(card, "replaceAllFields", "允许替换节点全部字段（高级；默认只替换名称）", profile.replaceAllFields);
         const renameRulesEditor = renderRenameRulesEditor(card, profile.renameRules || []);
