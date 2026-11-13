@@ -380,7 +380,7 @@ test("admin API manages subscriptions and refresh interval without public access
   assert.match(pageText, /已过期的旧汇总地址/);
   assert.match(pageText, /用户分发订阅/);
   assert.match(pageText, /备注名称（仅自己可见）/);
-  assert.match(pageText, /到期展示文字/);
+  assert.match(pageText, /到期日期/);
   assert.match(pageText, /分发订阅地址/);
   assert.match(pageText, /expiredName/);
   assert.doesNotMatch(pageText, /固定链接路径 Token/);
@@ -409,7 +409,7 @@ test("admin API manages subscriptions and refresh interval without public access
         tokens: ["old-aggregate-token-123456"],
         nodeNames: ["已到期", "请联系顾问", "请改用新地址"]
       },
-      distributionSubscriptions: [{ note: "张三", displayName: "到期日期26-11-13" }]
+      distributionSubscriptions: [{ note: "张三", expiresOn: "2026-12-11" }]
     })
   }), env);
   assert.equal(update.status, 200);
@@ -454,7 +454,8 @@ test("admin API manages subscriptions and refresh interval without public access
   });
   assert.equal(body.distributionSubscriptions.length, 1);
   assert.equal(body.distributionSubscriptions[0].note, "张三");
-  assert.equal(body.distributionSubscriptions[0].displayName, "到期日期26-11-13");
+  assert.equal(body.distributionSubscriptions[0].expiresOn, "2026-12-11");
+  assert.equal(body.distributionSubscriptions[0].displayName, "到期日期26-12-11");
   assert.match(body.distributionSubscriptions[0].publicToken, /^[A-Za-z0-9_-]{24,64}$/);
   const distributionToken = body.distributionSubscriptions[0].publicToken;
   assert.ok(audit.controls.has("profiles"));
@@ -532,9 +533,9 @@ test("admin API manages subscriptions and refresh interval without public access
   const distributionResponse = await worker.fetch(new Request("https://worker.example.com/sub/" + distributionToken), env);
   assert.equal(distributionResponse.status, 200);
   const distributionText = await distributionResponse.text();
-  assert.match(distributionText, /到期日期26-11-13/);
+  assert.match(distributionText, /到期日期26-12-11/);
   assert.match(distributionText, /US \| One/);
-  assert.ok(distributionText.indexOf("到期日期26-11-13") < distributionText.indexOf("US | One"));
+  assert.ok(distributionText.indexOf("到期日期26-12-11") < distributionText.indexOf("US | One"));
 
   const aggregateStateKey = "published-state-v1:__all__";
   const staleAggregateState = JSON.parse(await state.get(aggregateStateKey));
@@ -548,8 +549,38 @@ test("admin API manages subscriptions and refresh interval without public access
   const isolatedDistributionResponse = await worker.fetch(new Request("https://worker.example.com/sub/" + distributionToken), env);
   assert.equal(isolatedDistributionResponse.status, 200);
   const isolatedDistributionText = await isolatedDistributionResponse.text();
-  assert.match(isolatedDistributionText, /到期日期26-11-13/);
+  assert.match(isolatedDistributionText, /到期日期26-12-11/);
   assert.doesNotMatch(isolatedDistributionText, /订阅已过期|请联系顾问|续费后恢复/);
+
+  const expiredDistributionUpdate = await worker.fetch(new Request("https://worker.example.com/api/admin/subscriptions", {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({
+      subscriptions: [{
+        id: "工作一",
+        name: "主订阅",
+        sourceUrl: "https://source.example.com/sub?token=REDACTED",
+        renameRules: [],
+        nodeNameInclude: "US|VIP2",
+        nodeNameIncludeAll: "US|One",
+        nodeNameExclude: "到期|续费",
+        minValidNodes: 1,
+        defaultTarget: "base64"
+      }],
+      aggregatePublicToken: "new-aggregate-token-123456",
+      expiredSubscription: {
+        tokens: ["old-aggregate-token-123456"],
+        nodeNames: ["已到期", "请联系顾问", "请改用新地址"]
+      },
+      distributionSubscriptions: [{ note: "张三", expiresOn: "2020-01-01", publicToken: distributionToken }]
+    })
+  }), env);
+  assert.equal(expiredDistributionUpdate.status, 200);
+  const autoExpiredDistributionResponse = await worker.fetch(new Request("https://worker.example.com/sub/" + distributionToken), env);
+  assert.equal(autoExpiredDistributionResponse.status, 200);
+  const autoExpiredDistributionText = await autoExpiredDistributionResponse.text();
+  assert.match(autoExpiredDistributionText, /已到期/);
+  assert.doesNotMatch(autoExpiredDistributionText, /US \| One/);
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => { throw new Error("source window closed"); };

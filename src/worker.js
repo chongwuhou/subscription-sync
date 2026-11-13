@@ -112,6 +112,9 @@ const ADMIN_HTML = `<!doctype html>
     .expired-card > summary::after { content: "＋"; display: grid; width: 1.7rem; height: 1.7rem; place-items: center; color: var(--accent); border: 1px solid rgba(53,103,242,.25); border-radius: 50%; background: rgba(255,255,255,.62); font-size: 1.15rem; transition: transform .18s ease, background .18s ease; }
     .expired-card[open] > summary::after { content: "−"; background: rgba(224,235,255,.88); }
     .expired-card-body { padding-top: .35rem; }
+    .auto-expired-list { margin-top: .55rem; padding: .7rem; border: 1px solid rgba(121,151,221,.2); border-radius: 14px; background: rgba(255,255,255,.38); }
+    .auto-expired-row { overflow-wrap: anywhere; padding: .42rem 0; color: #53658a; font-size: .86rem; line-height: 1.45; border-bottom: 1px solid rgba(113,137,185,.12); }
+    .auto-expired-row:last-child { border-bottom: 0; }
     .profile-card { margin: 1rem 0; padding: .35rem .85rem .95rem; border: 1px solid var(--line); border-radius: 22px; background: rgba(255,255,255,.42); box-shadow: 0 18px 48px rgba(43,65,120,.08), inset 0 1px 0 rgba(255,255,255,.86); backdrop-filter: blur(20px) saturate(135%); }
     .profile-card > summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; cursor: pointer; font-weight: 750; padding: .8rem .35rem; color: #233c7e; list-style: none; }
     .profile-card > summary::-webkit-details-marker { display: none; }
@@ -509,7 +512,7 @@ const ADMIN_HTML = `<!doctype html>
       distributionCard.appendChild(distributionTitle);
       const distributionNote = document.createElement("p");
       distributionNote.className = "muted";
-      distributionNote.textContent = "每行对应一个用户：备注只供你在后台识别，不会进入订阅；到期展示文字会作为唯一提示节点放在汇总最上面。与下方“已过期的旧汇总地址”互不影响。";
+      distributionNote.textContent = "每行对应一个用户：备注只供你在后台识别；选择到期日期后，系统会自动生成“到期日期”提示节点，并在到期当天把该地址纳入下方旧汇总地址。";
       distributionCard.appendChild(distributionNote);
       const distributionRows = document.createElement("div");
       distributionRows.dataset.distributionRows = "true";
@@ -526,15 +529,14 @@ const ADMIN_HTML = `<!doctype html>
         noteInput.placeholder = "例如：张三 / 业务一组";
         noteLabel.appendChild(noteInput);
         row.appendChild(noteLabel);
-        const displayLabel = document.createElement("label");
-        displayLabel.textContent = "到期展示文字";
-        const displayInput = document.createElement("input");
-        displayInput.type = "text";
-        displayInput.dataset.distributionDisplay = "true";
-        displayInput.value = item.displayName || "";
-        displayInput.placeholder = "例如：到期日期26-11-13";
-        displayLabel.appendChild(displayInput);
-        row.appendChild(displayLabel);
+        const expiryLabel = document.createElement("label");
+        expiryLabel.textContent = "到期日期";
+        const expiryInput = document.createElement("input");
+        expiryInput.type = "date";
+        expiryInput.dataset.distributionExpiry = "true";
+        expiryInput.value = item.expiresOn || "";
+        expiryLabel.appendChild(expiryInput);
+        row.appendChild(expiryLabel);
         const linkInput = addField(row, "distributionLink", "分发订阅地址（自动生成，可修改 /sub/ 后路径）", publicLinkFor(item.publicToken), "url", location.origin + "/sub/保存后自动生成");
         linkInput.dataset.distributionLink = "true";
         const copyButton = document.createElement("button");
@@ -598,8 +600,30 @@ const ADMIN_HTML = `<!doctype html>
       ));
       const expiredNote = document.createElement("p");
       expiredNote.className = "muted";
-      expiredNote.textContent = "操作顺序：先把上面的汇总地址改成新地址，再把旧地址粘贴到这里，最后点击保存。旧地址会继续有效，但只返回这 3 个提示名称；新地址返回正常节点。";
+      expiredNote.textContent = "手动旧地址仍按上面配置；用户分发地址到期后会自动加入下面的自动列表，并返回过期提示节点，不需要手动复制。";
       expiredBody.appendChild(expiredNote);
+      const autoExpiredTitle = document.createElement("strong");
+      autoExpiredTitle.textContent = "自动到期分发地址（只读）";
+      expiredBody.appendChild(autoExpiredTitle);
+      const autoExpiredList = document.createElement("div");
+      autoExpiredList.className = "auto-expired-list";
+      const chinaDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).format(new Date());
+      const distributionItems = Array.isArray(state.distributionSubscriptions) ? state.distributionSubscriptions : [];
+      if (distributionItems.length === 0) {
+        const emptyAuto = document.createElement("p");
+        emptyAuto.className = "muted";
+        emptyAuto.textContent = "暂无用户分发地址；新增后，到期日期会自动显示在这里。";
+        autoExpiredList.appendChild(emptyAuto);
+      } else {
+        distributionItems.forEach((item) => {
+          const autoRow = document.createElement("div");
+          autoRow.className = "auto-expired-row";
+          const expired = item.expiresOn && item.expiresOn <= chinaDate;
+          autoRow.textContent = (item.note || "未备注") + "｜到期 " + (item.expiresOn || "未设置日期") + "｜" + (expired ? "已自动进入旧汇总" : "到期后自动进入") + "｜" + publicLinkFor(item.publicToken);
+          autoExpiredList.appendChild(autoRow);
+        });
+      }
+      expiredBody.appendChild(autoExpiredList);
       expiredCard.appendChild(expiredBody);
       aggregateRoot.appendChild(expiredCard);
     }
@@ -932,10 +956,10 @@ const ADMIN_HTML = `<!doctype html>
         const aggregateCustomNodePosition = aggregateRoot.querySelector("[data-field='aggregateCustomNodePosition']")?.value || "tail";
         const distributionSubscriptions = Array.from(aggregateRoot.querySelectorAll("[data-distribution-row='true']")).map((row, index) => ({
           note: row.querySelector("[data-distribution-note='true']")?.value.trim() || "",
-          displayName: row.querySelector("[data-distribution-display='true']")?.value.trim() || "",
+          expiresOn: row.querySelector("[data-distribution-expiry='true']")?.value.trim() || "",
           publicToken: publicTokenFromLink(row.querySelector("[data-distribution-link='true']")?.value || "", index)
         }));
-        if (distributionSubscriptions.some((item) => !item.displayName)) throw new Error("用户分发订阅的到期展示文字不能留空");
+        if (distributionSubscriptions.some((item) => !item.expiresOn)) throw new Error("用户分发订阅的到期日期不能留空");
         if (expiredNodeNames.some((name) => !name)) throw new Error("过期提示节点名称不能留空");
         if (subscriptions.length === 0) throw new Error("当前没有订阅配置，请先点击“新增订阅”并填写完整后再保存");
         await api("/api/admin/subscriptions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscriptions, aggregatePublicToken, expiredSubscription: { tokens: expiredTokens, nodeNames: expiredNodeNames }, distributionSubscriptions }) });
@@ -1315,16 +1339,58 @@ function normalizeDistributionNote(value) {
     .slice(0, 120);
 }
 
+function normalizeDistributionExpiry(value) {
+  const text = String(value ?? "").trim();
+  const direct = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const legacy = text.match(/(?:到期日期)?(\d{2})-(\d{2})-(\d{2})/);
+  const year = direct ? Number(direct[1]) : legacy ? 2000 + Number(legacy[1]) : 0;
+  const month = direct ? Number(direct[2]) : legacy ? Number(legacy[2]) : 0;
+  const day = direct ? Number(direct[3]) : legacy ? Number(legacy[3]) : 0;
+  if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) return "";
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "";
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function distributionDisplayName(expiresOn, fallback = "") {
+  return expiresOn ? `到期日期${expiresOn.slice(2)}` : normalizeDistributionDisplayName(fallback);
+}
+
+function chinaDateString(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function getExpiredDistributionSubscriptions(value, now = new Date()) {
+  const today = chinaDateString(now);
+  return (Array.isArray(value) ? value : []).filter((item) => item.expiresOn && item.expiresOn <= today);
+}
+
+function mergeExpiredDistributionSubscriptions(expiredSubscription, distributionSubscriptions, now = new Date()) {
+  const automaticTokens = getExpiredDistributionSubscriptions(distributionSubscriptions, now).map((item) => item.publicToken);
+  return normalizeExpiredSubscription({
+    tokens: [...expiredSubscription.tokens, ...automaticTokens],
+    nodeNames: expiredSubscription.nodeNames
+  });
+}
+
 function normalizeDistributionSubscriptions(value) {
   const items = Array.isArray(value) ? value : [];
   const seen = new Set();
   return items.map((item) => {
     const note = normalizeDistributionNote(item?.note ?? item?.remark);
     const displayName = normalizeDistributionDisplayName(item?.displayName ?? item?.name);
+    const expiresOn = normalizeDistributionExpiry(item?.expiresOn ?? item?.expiryDate ?? displayName);
     const publicToken = String(item?.publicToken ?? "").trim();
-    if (!displayName || !/^[A-Za-z0-9_-]{1,128}$/.test(publicToken) || seen.has(publicToken)) return null;
+    if ((!displayName && !expiresOn) || !/^[A-Za-z0-9_-]{1,128}$/.test(publicToken) || seen.has(publicToken)) return null;
     seen.add(publicToken);
-    return { note, displayName, publicToken };
+    return { note, expiresOn, displayName: distributionDisplayName(expiresOn, displayName), publicToken };
   }).filter(Boolean).slice(0, 200);
 }
 
@@ -1336,8 +1402,9 @@ function prepareDistributionSubscriptions(value, reservedTokens = new Set()) {
   for (let index = 0; index < value.length; index += 1) {
     const item = value[index] && typeof value[index] === "object" ? value[index] : {};
     const note = normalizeDistributionNote(item.note ?? item.remark);
-    const displayName = normalizeDistributionDisplayName(item.displayName ?? item.name);
-    if (!displayName) return { items: null, error: `用户分发订阅第 ${index + 1} 行的到期展示文字不能为空` };
+    const expiresOn = normalizeDistributionExpiry(item.expiresOn ?? item.expiryDate ?? item.displayName ?? item.name);
+    const displayName = distributionDisplayName(expiresOn, item.displayName ?? item.name);
+    if (!expiresOn) return { items: null, error: `用户分发订阅第 ${index + 1} 行的到期日期格式不正确` };
     let publicToken = String(item.publicToken ?? "").trim();
     if (publicToken && !/^[A-Za-z0-9_-]{1,128}$/.test(publicToken)) {
       return { items: null, error: `用户分发订阅第 ${index + 1} 行的地址路径格式不正确` };
@@ -1347,7 +1414,7 @@ function prepareDistributionSubscriptions(value, reservedTokens = new Set()) {
     }
     if (seen.has(publicToken)) return { items: null, error: `用户分发订阅第 ${index + 1} 行的地址与其他订阅重复` };
     seen.add(publicToken);
-    items.push({ note, displayName, publicToken });
+    items.push({ note, expiresOn, displayName, publicToken });
   }
   return { items, error: null };
 }
@@ -2435,6 +2502,10 @@ export default {
     }
     if (request.method === "GET" && url.pathname.startsWith("/sub/")) {
       const publicConfig = await loadPublicRouteConfig(env);
+      const effectiveExpiredSubscription = mergeExpiredDistributionSubscriptions(
+        publicConfig.expiredSubscription,
+        publicConfig.distributionSubscriptions
+      );
       const token = url.pathname.slice("/sub/".length);
       const profile = publicConfig.profiles.find((item) => item.publicToken === token);
       if (profile) return servePublished(env, profile, request, publicConfig.settings);
@@ -2443,9 +2514,12 @@ export default {
       }
       const distributionSubscription = publicConfig.distributionSubscriptions.find((item) => item.publicToken === token);
       if (token && distributionSubscription) {
-        return serveDistributionSubscription(env, distributionSubscription, request, publicConfig.settings, publicConfig.expiredSubscription);
+        if (effectiveExpiredSubscription.tokens.includes(token)) {
+          return serveExpiredSubscription(env, effectiveExpiredSubscription, request, publicConfig.settings);
+        }
+        return serveDistributionSubscription(env, distributionSubscription, request, publicConfig.settings, effectiveExpiredSubscription);
       }
-      const expiredSubscription = publicConfig.expiredSubscription;
+      const expiredSubscription = effectiveExpiredSubscription;
       if (token && expiredSubscription.tokens.includes(token)) {
         return serveExpiredSubscription(env, expiredSubscription, request, publicConfig.settings);
       }
