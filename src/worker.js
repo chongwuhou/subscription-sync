@@ -84,7 +84,7 @@ const ADMIN_HTML = `<!doctype html>
     .distribution-card { margin-top: 1rem; padding: 1rem; border: 1px solid rgba(121,151,221,.25); border-radius: 18px; background: rgba(255,255,255,.48); }
     .distribution-card > h3 { margin: 0; color: #304779; font-size: 1.05rem; }
     .distribution-card > p { margin: .35rem 0 .8rem; }
-    .distribution-row { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.4fr) auto auto; gap: .55rem; align-items: end; margin: .65rem 0; padding: .7rem; border: 1px solid rgba(255,255,255,.78); border-radius: 14px; background: rgba(255,255,255,.52); }
+    .distribution-row { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, .95fr) minmax(0, 1.45fr) auto auto; gap: .55rem; align-items: end; margin: .65rem 0; padding: .7rem; border: 1px solid rgba(255,255,255,.78); border-radius: 14px; background: rgba(255,255,255,.52); }
     .distribution-row label { margin: 0; min-width: 0; }
     .distribution-row button { margin: 0; white-space: nowrap; }
     .distribution-row .distribution-copy { color: #244dc6; }
@@ -503,7 +503,7 @@ const ADMIN_HTML = `<!doctype html>
       distributionCard.appendChild(distributionTitle);
       const distributionNote = document.createElement("p");
       distributionNote.className = "muted";
-      distributionNote.textContent = "每行对应一个用户：填写要展示的到期文字，系统生成独立订阅地址；打开后会把该提示节点放在汇总节点最上面。与下方“已过期的旧汇总地址”互不影响。";
+      distributionNote.textContent = "每行对应一个用户：备注只供你在后台识别，不会进入订阅；到期展示文字会作为唯一提示节点放在汇总最上面。与下方“已过期的旧汇总地址”互不影响。";
       distributionCard.appendChild(distributionNote);
       const distributionRows = document.createElement("div");
       distributionRows.dataset.distributionRows = "true";
@@ -511,6 +511,15 @@ const ADMIN_HTML = `<!doctype html>
         const row = document.createElement("div");
         row.className = "distribution-row";
         row.dataset.distributionRow = "true";
+        const noteLabel = document.createElement("label");
+        noteLabel.textContent = "备注名称（仅自己可见）";
+        const noteInput = document.createElement("input");
+        noteInput.type = "text";
+        noteInput.dataset.distributionNote = "true";
+        noteInput.value = item.note || "";
+        noteInput.placeholder = "例如：张三 / 业务一组";
+        noteLabel.appendChild(noteInput);
+        row.appendChild(noteLabel);
         const displayLabel = document.createElement("label");
         displayLabel.textContent = "到期展示文字";
         const displayInput = document.createElement("input");
@@ -916,6 +925,7 @@ const ADMIN_HTML = `<!doctype html>
         const aggregateCustomNodes = aggregateRoot.querySelector("[data-field='aggregateCustomNodes']")?.value.split(/\\r?\\n/).map((item) => item.trim()).filter(Boolean) || [];
         const aggregateCustomNodePosition = aggregateRoot.querySelector("[data-field='aggregateCustomNodePosition']")?.value || "tail";
         const distributionSubscriptions = Array.from(aggregateRoot.querySelectorAll("[data-distribution-row='true']")).map((row, index) => ({
+          note: row.querySelector("[data-distribution-note='true']")?.value.trim() || "",
           displayName: row.querySelector("[data-distribution-display='true']")?.value.trim() || "",
           publicToken: publicTokenFromLink(row.querySelector("[data-distribution-link='true']")?.value || "", index)
         }));
@@ -1291,15 +1301,24 @@ function normalizeDistributionDisplayName(value) {
     .slice(0, 200);
 }
 
+function normalizeDistributionNote(value) {
+  return String(value ?? "")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
 function normalizeDistributionSubscriptions(value) {
   const items = Array.isArray(value) ? value : [];
   const seen = new Set();
   return items.map((item) => {
+    const note = normalizeDistributionNote(item?.note ?? item?.remark);
     const displayName = normalizeDistributionDisplayName(item?.displayName ?? item?.name);
     const publicToken = String(item?.publicToken ?? "").trim();
     if (!displayName || !/^[A-Za-z0-9_-]{1,128}$/.test(publicToken) || seen.has(publicToken)) return null;
     seen.add(publicToken);
-    return { displayName, publicToken };
+    return { note, displayName, publicToken };
   }).filter(Boolean).slice(0, 200);
 }
 
@@ -1310,6 +1329,7 @@ function prepareDistributionSubscriptions(value, reservedTokens = new Set()) {
   const items = [];
   for (let index = 0; index < value.length; index += 1) {
     const item = value[index] && typeof value[index] === "object" ? value[index] : {};
+    const note = normalizeDistributionNote(item.note ?? item.remark);
     const displayName = normalizeDistributionDisplayName(item.displayName ?? item.name);
     if (!displayName) return { items: null, error: `用户分发订阅第 ${index + 1} 行的到期展示文字不能为空` };
     let publicToken = String(item.publicToken ?? "").trim();
@@ -1321,7 +1341,7 @@ function prepareDistributionSubscriptions(value, reservedTokens = new Set()) {
     }
     if (seen.has(publicToken)) return { items: null, error: `用户分发订阅第 ${index + 1} 行的地址与其他订阅重复` };
     seen.add(publicToken);
-    items.push({ displayName, publicToken });
+    items.push({ note, displayName, publicToken });
   }
   return { items, error: null };
 }
